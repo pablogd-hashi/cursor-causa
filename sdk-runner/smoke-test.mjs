@@ -3,20 +3,21 @@
 // Purpose: prove, end-to-end and before we build the real integration, that a
 // Cursor *cloud* agent can clone the target repo, investigate the payments
 // pool-exhaustion incident, run the oracle test, and return RCA JSON that
-// matches our contract. This is intentionally throwaway — the Phase 3 runner
-// will replace it with a streaming JSONL protocol Causa consumes.
+// matches our contract. Throwaway: the Phase 3 runner replaces it with a
+// streaming JSONL protocol Causa consumes.
 //
-// It also serves a second purpose on its first run: it prints every streamed
-// event verbatim, so we can see the *actual* event shapes (the public-beta SDK
-// does not document them exhaustively) and tune the real runner accordingly.
+// It captures the ground truth we need to build that runner:
+//   events.jsonl  - every streamed event, verbatim (the real event schema)
+//   result.json   - the full final run object from getRun().wait()
+//   rca-output.json - best-effort extraction of the agent's RCA JSON
 //
 // Run:  cd sdk-runner && npm install && CURSOR_API_KEY=... node smoke-test.mjs
 //
-// Requires: a Pro plan, the Cursor GitHub app authorised on the target repo,
-// and the repo actually pushed to GitHub (the cloud VM clones it from there).
+// Requires: Pro plan, the Cursor GitHub app authorised on the target repo, and
+// the repo pushed to GitHub (the cloud VM clones it from there).
 
 import { Agent } from "@cursor/sdk";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +32,6 @@ const repoUrl = process.env.CURSOR_TARGET_REPO ?? "https://github.com/pablogd-ha
 const ref = process.env.CURSOR_TARGET_REF ?? "main";
 const model = process.env.CURSOR_MODEL ?? "composer-2";
 
-// Hand the agent the exact contract it must return.
 const schema = readFileSync(join(__dir, "..", "schema", "rca.schema.json"), "utf8");
 
 const prompt = `You are a codebase investigator, not a code generator. Investigate a
@@ -56,46 +56,57 @@ no markdown code fences, JSON only:
 
 ${schema}`;
 
+// Pull any text-like payload out of an event/message of unknown shape.
+function extractText(node) {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (typeof node.text === "string") return node.text;
+  if (typeof node.delta === "string") return node.delta;
+  if (typeof node.content === "string") return node.content;
+  if (Array.isArray(node.content)) return node.content.map(extractText).join("");
+  if (node.message) return extractText(node.message);
+  return "";
+}
+
 console.error(`launching cloud agent on ${repoUrl}@${ref} (model: ${model})`);
 
 const agent = await Agent.create({
   apiKey,
   model: { id: model },
-  cloud: {
-    repos: [{ url: repoUrl, startingRef: ref }],
-    autoCreatePR: false, // never auto-open a PR; the engineer decides.
-  },
+  cloud: { repos: [{ url: repoUrl, startingRef: ref }], autoCreatePR: false },
 });
+
+// The web link to watch this same run inside Cursor (cursor.com/agents).
+console.error(`agent id: ${agent?.id ?? "?"}`);
+console.error(`view in Cursor: ${agent?.url ?? "https://cursor.com/agents"}`);
 
 const run = await agent.send(prompt);
 
-// Accumulate assistant text; print every event compactly so we learn the shapes.
+const eventsPath = join(__dir, "events.jsonl");
+writeFileSync(eventsPath, ""); // truncate from any previous run
+
 let assistantText = "";
 for await (const event of run.stream()) {
-  const type = event?.type ?? "unknown";
-  const text = event?.text ?? event?.delta ?? event?.content ?? "";
-  if (type === "assistant" && typeof text === "string") assistantText += text;
-  // One compact line per event — this is the bit that reveals the real schema.
-  console.error(`[event] ${JSON.stringify(event).slice(0, 300)}`);
+  appendFileSync(eventsPath, JSON.stringify(event) + "\n");
+  if ((event?.type ?? "") === "assistant") assistantText += extractText(event);
+  console.error(`[event ${event?.type ?? "unknown"}] ${JSON.stringify(event).slice(0, 200)}`);
 }
 
-// Wait for the cloud run to finish and pull the final result.
 const result = await (
   await Agent.getRun(run.id, { runtime: "cloud", agentId: run.agentId })
 ).wait();
-
+writeFileSync(join(__dir, "result.json"), JSON.stringify(result, null, 2) + "\n");
 console.error(`\nrun status: ${result?.status ?? "unknown"}`);
-const prUrl = result?.git?.branches?.[0]?.prUrl;
-if (prUrl) console.error(`PR (should be none, autoCreatePR=false): ${prUrl}`);
 
-// Best-effort: carve the JSON object out of the final assistant text.
-const t = assistantText.trim();
-const a = t.indexOf("{");
-const b = t.lastIndexOf("}");
-const json = a >= 0 && b > a ? t.slice(a, b + 1) : t;
-const outPath = join(__dir, "rca-output.json");
-writeFileSync(outPath, json + "\n");
-console.error(`\nwrote ${outPath} — validate it with:`);
+// Prefer the final text off the result object; fall back to streamed assistant text.
+const finalText = (extractText(result?.messages?.at?.(-1)) || extractText(result) || assistantText).trim();
+const a = finalText.indexOf("{");
+const b = finalText.lastIndexOf("}");
+const json = a >= 0 && b > a ? finalText.slice(a, b + 1) : finalText;
+writeFileSync(join(__dir, "rca-output.json"), json + "\n");
+
+console.error("\nwrote events.jsonl, result.json, rca-output.json");
+console.error("validate the RCA with:");
 console.error(
   `  ../.venv/bin/python -c "from causa.contract import RCA; RCA.model_validate_json(open('sdk-runner/rca-output.json').read()); print('RCA valid')"`
 );
