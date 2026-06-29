@@ -1,5 +1,7 @@
 # Causa
 
+Causa automates root-cause analysis for production alerts by triaging observability and change data, investigating the affected codebase with a Cursor Cloud Agent, and returning a validated RCA.
+
 Causa is a Cursor-driven Root Cause Analysis console. When an alert fires for the
 `payments` service, Causa does cheap, deterministic **triage** (pulling the metric
 signature from Grafana and the candidate commits/PRs from GitHub, both over MCP),
