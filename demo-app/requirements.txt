@@ -1,0 +1,12 @@
+# payments demo service. OTel pinned to the 1.29.x line used by the reference
+# repo so the Collector pipeline behaves identically.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+
+# Test-only (kept here so the Cloud Agent's VM can run the oracle test).
+pytest==8.3.4
+httpx==0.28.1

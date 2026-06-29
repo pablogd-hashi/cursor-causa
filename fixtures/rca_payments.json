@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "investigation_id": "inv-2025-0317-0214-payments",
+  "service": "payments",
+  "generated_by": "mock",
+  "summary": "PR #482 lowered the DB connection pool max_size from 50 to 10, exhausting the pool under normal load and driving p99 latency from 180ms to 9.2s.",
+  "confidence": {
+    "score": 0.86,
+    "rationale": "The reverted code passes the pool-exhaustion test that fails on current; the metric inflection lines up with the deploy to within two minutes; no other change in the window touches the pool."
+  },
+  "timeline": [
+    {
+      "timestamp": "2025-03-17T02:09:00Z",
+      "kind": "deploy",
+      "label": "Deploy of payments @ a1b2c3d (PR #482 merged 01:58)",
+      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/pull/482"
+    },
+    {
+      "timestamp": "2025-03-17T02:11:30Z",
+      "kind": "metric_inflection",
+      "label": "payments_pool_inuse saturates at max_size=10; wait queue begins growing",
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=1742176200000&to=1742178000000"
+    },
+    {
+      "timestamp": "2025-03-17T02:14:00Z",
+      "kind": "alert",
+      "label": "PaymentsHighLatencyP99 fired (p99 > 1s for 3m)",
+      "deeplink": "http://localhost:3000/alerting/list"
+    }
+  ],
+  "evidence": [
+    {
+      "source": "github",
+      "detail": "PR #482 'tune pool sizing' changed POOL_MAX_SIZE from 50 to 10 in demo-app/payments/pool.py; merged 01:58, only change in the 30m pre-alert window touching payments.",
+      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/pull/482/files"
+    },
+    {
+      "source": "grafana",
+      "detail": "payments_pool_inuse pinned at 10 (==max) from 02:11; payments_pool_wait_seconds p99 climbs in lockstep with request latency.",
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4"
+    },
+    {
+      "source": "code",
+      "detail": "acquire() in demo-app/payments/pool.py blocks on an asyncio.Semaphore sized by POOL_MAX_SIZE; the checkout path holds a connection across an external call, so a small pool serialises all in-flight payments.",
+      "deeplink": null
+    },
+    {
+      "source": "test",
+      "detail": "test_pool_exhaustion asserts p95 acquire latency < 200ms under 25 concurrent callers; fails on current (max_size=10), passes on revert (max_size=50).",
+      "deeplink": null
+    }
+  ],
+  "code_path": {
+    "summary": "Inbound charge -> ConnectionPool.acquire() blocks on an undersized semaphore -> request latency tracks pool wait time.",
+    "nodes": [
+      {
+        "file": "demo-app/payments/api.py",
+        "function": "charge",
+        "note": "Entry point; acquires a pooled connection before writing the ledger row."
+      },
+      {
+        "file": "demo-app/payments/pool.py",
+        "function": "ConnectionPool.acquire",
+        "note": "Blocks on asyncio.Semaphore(POOL_MAX_SIZE); POOL_MAX_SIZE was cut to 10 in PR #482."
+      },
+      {
+        "file": "demo-app/payments/pool.py",
+        "function": "ConnectionPool.__init__",
+        "note": "Reads POOL_MAX_SIZE; this is the line the regression changed."
+      }
+    ]
+  },
+  "supporting_telemetry": [
+    {
+      "signal": "payments_pool_inuse",
+      "query": "max(payments_pool_inuse{service=\"payments\"})",
+      "observation": "Flatlines at 10 from 02:11, i.e. the pool is fully saturated.",
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=1742176200000&to=1742178000000"
+    },
+    {
+      "signal": "payments_request_duration_seconds",
+      "query": "histogram_quantile(0.99, sum by (le) (rate(payments_request_duration_seconds_bucket[1m])))",
+      "observation": "p99 rises from 0.18s to 9.2s starting 02:11, two minutes after the deploy.",
+      "deeplink": "http://localhost:16686/trace/example-slow-charge-trace"
+    }
+  ],
+  "blast_radius": {
+    "if_rolled_back": ["checkout", "refunds", "invoice", "ledger"],
+    "graph_source": "declared:topology.yaml",
+    "note": "All four depend on payments (ledger transitively via refunds). A full rollback of PR #482 reverts unrelated pool-metrics instrumentation also in that PR, so it is not a clean revert."
+  },
+  "recommended_action": {
+    "action": "staged_rollout",
+    "reasoning": "A one-line forward-fix (restore POOL_MAX_SIZE=50, keep the new metrics) is safer than reverting the whole PR. Roll it to one payments replica first, confirm payments_pool_inuse stops saturating, then complete. A blunt rollback would also undo the pool instrumentation that made this diagnosable."
+  },
+  "tests": {
+    "recommended": [
+      "test_pool_exhaustion",
+      "test_charge_latency_under_load"
+    ],
+    "executed": [
+      {
+        "name": "test_pool_exhaustion",
+        "result_on_current": "fail",
+        "result_on_revert": "pass"
+      },
+      {
+        "name": "test_charge_latency_under_load",
+        "result_on_current": "fail",
+        "result_on_revert": "pass"
+      }
+    ]
+  },
+  "draft_pr": null
+}

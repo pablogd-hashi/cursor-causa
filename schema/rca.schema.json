@@ -1,0 +1,437 @@
+{
+  "$defs": {
+    "Action": {
+      "description": "The recommended remediation. ``staged_rollout`` exists because a blunt\nrollback can have a wide blast radius (see ``BlastRadius``).",
+      "enum": [
+        "rollback",
+        "forward_fix",
+        "staged_rollout",
+        "investigate_more"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "BlastRadius": {
+      "description": "Downstream impact of rolling back. ``graph_source`` records provenance so\nthe demo can show this came from the declared topology now, and would come\nfrom Consul in production (the seam is deliberate).",
+      "properties": {
+        "if_rolled_back": {
+          "items": {
+            "type": "string"
+          },
+          "title": "If Rolled Back",
+          "type": "array"
+        },
+        "graph_source": {
+          "title": "Graph Source",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "if_rolled_back",
+        "graph_source",
+        "note"
+      ],
+      "title": "BlastRadius",
+      "type": "object"
+    },
+    "CodePath": {
+      "description": "The implicated execution path: a one-line summary plus the ordered nodes.",
+      "properties": {
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/CodePathNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "summary",
+        "nodes"
+      ],
+      "title": "CodePath",
+      "type": "object"
+    },
+    "CodePathNode": {
+      "description": "One node in the implicated execution path. ``note`` records *why* this\nfile/function participates, which is the whole point of the Cursor demo.",
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "function": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Function"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "CodePathNode",
+      "type": "object"
+    },
+    "Confidence": {
+      "description": "A bounded confidence score plus a short human rationale. The score is\nconstrained to 0..1 so the console can render it as a gauge without clamping.",
+      "properties": {
+        "score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "score",
+        "rationale"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "DraftPR": {
+      "description": "An optional draft PR. Only ever populated when the engineer approves a fix;\nCausa never opens this automatically.",
+      "properties": {
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "summary"
+      ],
+      "title": "DraftPR",
+      "type": "object"
+    },
+    "Evidence": {
+      "description": "A single supporting fact, tagged by source and optionally deep-linked\ninto Grafana/Jaeger/GitHub so the engineer can verify it in one click.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "deeplink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deeplink"
+        }
+      },
+      "required": [
+        "source",
+        "detail"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Where a piece of evidence came from. Drives the icon/colour in the console.",
+      "enum": [
+        "grafana",
+        "github",
+        "code",
+        "test"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "GeneratedBy": {
+      "description": "Which investigator produced this RCA. ``mock`` keeps the demo reliable\nwithout a live Cursor run; ``cursor`` is a real Cloud Agent investigation.",
+      "enum": [
+        "mock",
+        "cursor"
+      ],
+      "title": "GeneratedBy",
+      "type": "string"
+    },
+    "RecommendedAction": {
+      "description": "The recommendation plus its reasoning, e.g. 'rollback undoes Checkout and\nRefunds; recommend a staged rollout instead.'",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "reasoning": {
+          "title": "Reasoning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reasoning"
+      ],
+      "title": "RecommendedAction",
+      "type": "object"
+    },
+    "TelemetrySignal": {
+      "description": "A metric or log signal that supports the conclusion, with the query that\nproduced it and a deeplink to the exact panel/trace. ``deeplink`` is required\nhere (unlike on ``Evidence``) because supporting telemetry must be verifiable.",
+      "properties": {
+        "signal": {
+          "title": "Signal",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query"
+        },
+        "observation": {
+          "title": "Observation",
+          "type": "string"
+        },
+        "deeplink": {
+          "title": "Deeplink",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signal",
+        "observation",
+        "deeplink"
+      ],
+      "title": "TelemetrySignal",
+      "type": "object"
+    },
+    "TestExecution": {
+      "description": "A test the agent actually ran, on current code and on reverted code. The\ncurrent-vs-revert pair is what turns a hypothesis into a demonstrated cause.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "result_on_current": {
+          "$ref": "#/$defs/TestResult"
+        },
+        "result_on_revert": {
+          "$ref": "#/$defs/TestResult"
+        }
+      },
+      "required": [
+        "name",
+        "result_on_current",
+        "result_on_revert"
+      ],
+      "title": "TestExecution",
+      "type": "object"
+    },
+    "TestResult": {
+      "description": "Outcome of a single test execution in the agent's VM.",
+      "enum": [
+        "pass",
+        "fail",
+        "skipped",
+        "error"
+      ],
+      "title": "TestResult",
+      "type": "string"
+    },
+    "Tests": {
+      "description": "Tests the agent recommends, and the ones it executed with their results.",
+      "properties": {
+        "recommended": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Recommended",
+          "type": "array"
+        },
+        "executed": {
+          "items": {
+            "$ref": "#/$defs/TestExecution"
+          },
+          "title": "Executed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "recommended",
+        "executed"
+      ],
+      "title": "Tests",
+      "type": "object"
+    },
+    "TimelineEvent": {
+      "description": "One ordered event on the incident timeline (Causa's own synthesis).",
+      "properties": {
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TimelineKind"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "deeplink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deeplink"
+        }
+      },
+      "required": [
+        "timestamp",
+        "kind",
+        "label"
+      ],
+      "title": "TimelineEvent",
+      "type": "object"
+    },
+    "TimelineKind": {
+      "description": "The type of a timeline event, so the console can style the incident timeline.",
+      "enum": [
+        "alert",
+        "deploy",
+        "pr",
+        "metric_inflection",
+        "note"
+      ],
+      "title": "TimelineKind",
+      "type": "string"
+    }
+  },
+  "description": "The root-cause-analysis contract. This is the product of an investigation.\n\n``draft_pr`` is optional and only present when a fix has been approved \u2014 the\nRCA stands on its own without it.",
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "investigation_id": {
+      "title": "Investigation Id",
+      "type": "string"
+    },
+    "service": {
+      "default": "payments",
+      "title": "Service",
+      "type": "string"
+    },
+    "generated_by": {
+      "$ref": "#/$defs/GeneratedBy"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "confidence": {
+      "$ref": "#/$defs/Confidence"
+    },
+    "timeline": {
+      "items": {
+        "$ref": "#/$defs/TimelineEvent"
+      },
+      "title": "Timeline",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "code_path": {
+      "$ref": "#/$defs/CodePath"
+    },
+    "supporting_telemetry": {
+      "items": {
+        "$ref": "#/$defs/TelemetrySignal"
+      },
+      "title": "Supporting Telemetry",
+      "type": "array"
+    },
+    "blast_radius": {
+      "$ref": "#/$defs/BlastRadius"
+    },
+    "recommended_action": {
+      "$ref": "#/$defs/RecommendedAction"
+    },
+    "tests": {
+      "$ref": "#/$defs/Tests"
+    },
+    "draft_pr": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DraftPR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "investigation_id",
+    "generated_by",
+    "summary",
+    "confidence",
+    "timeline",
+    "evidence",
+    "code_path",
+    "supporting_telemetry",
+    "blast_radius",
+    "recommended_action",
+    "tests"
+  ],
+  "title": "RCA",
+  "type": "object"
+}

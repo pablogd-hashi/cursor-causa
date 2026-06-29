@@ -1,0 +1,36 @@
+# --- Secrets -----------------------------------------------------------------
+# Never commit real credentials. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# --- Python ------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node (sdk-runner) -------------------------------------------------------
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Investigation output written by the SDK smoke-test.
+sdk-runner/rca-output.json
+
+# --- Local data / logs -------------------------------------------------------
+*.log
+
+# --- OS / editor -------------------------------------------------------------
+.DS_Store
+.idea/
+*.swp
+
+# Note: schema/rca.schema.json IS tracked on purpose — it is generated from
+# causa/contract.py but is a deliverable handed to the Cursor agent.

@@ -1,0 +1,138 @@
+# Causa — local-first stack. Phase 0 defines the topology; the observability
+# config files (otel-collector, prometheus, grafana, loki) and the application
+# images (demo-app, causa-api, causa-console) are populated in Phase 1+.
+# Therefore `docker compose up` is not expected to fully start yet;
+# `docker compose config` (lint) is the Phase 0 check.
+#
+# One user-defined bridge network keeps the demo simple (the reference used a
+# Consul Connect mesh; that is deliberately left behind — see architecture.md).
+# The two MCP servers and the Node SDK runner are NOT services here: they are
+# subprocesses spawned by causa-api (stdio MCP + JSONL streaming respectively).
+
+name: causa
+
+networks:
+  causa:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+
+services:
+  # --- Observability backends (config lifted from smolagents-observability) ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./observability/otel-collector/config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks: [causa]
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=otlp-write-receiver
+      - --enable-feature=native-histograms
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [causa]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks: [causa]
+    # The webhook receiver in alertmanager.yml posts firing alerts to
+    # http://causa-api:8000/webhook/alert with the shared secret. This is how a
+    # *real* alert reaches Causa.
+
+  loki:
+    image: grafana/loki:3.3.0
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks: [causa]
+
+  jaeger:
+    image: jaegertracing/jaeger:2.2.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI (deeplink target)
+    networks: [causa]
+
+  grafana:
+    image: grafana/grafana:11.5.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"   # deeplink target
+    depends_on: [prometheus, loki, jaeger]
+    networks: [causa]
+
+  # --- The breakable service under investigation (Phase 1) --------------------
+  demo-app:
+    build: ./demo-app
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME: "payments"
+      # The breakable knob. Healthy default 50; break.sh recreates with 10.
+      POOL_MAX_SIZE: "${POOL_MAX_SIZE:-50}"
+      DB_WRITE_S: "${DB_WRITE_S:-0.03}"
+      EXT_CALL_S: "${EXT_CALL_S:-0.07}"
+    ports:
+      - "8080:8080"
+    depends_on: [otel-collector]
+    networks: [causa]
+
+  # --- Causa itself (Phase 4/5) ----------------------------------------------
+  causa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api   # bundles Python + Node 20 + @cursor/sdk +
+                                   # the mcp-grafana and github-mcp-server binaries
+    environment:
+      CURSOR_API_KEY: "${CURSOR_API_KEY:-}"
+      CURSOR_TARGET_REPO: "${CURSOR_TARGET_REPO:-https://github.com/pablogd-hashi/cursor-causa}"
+      CURSOR_TARGET_REF: "${CURSOR_TARGET_REF:-main}"
+      CURSOR_MODEL: "${CURSOR_MODEL:-composer-2}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
+      GRAFANA_URL: "http://grafana:3000"
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: "${GRAFANA_SERVICE_ACCOUNT_TOKEN:-}"
+      CAUSA_WEBHOOK_SECRET: "${CAUSA_WEBHOOK_SECRET:-}"
+      MODEL_PROVIDER: "${MODEL_PROVIDER:-mock}"
+    ports:
+      - "8000:8000"
+    depends_on: [grafana, prometheus]
+    networks: [causa]
+
+  causa-console:
+    build:
+      context: .
+      dockerfile: Dockerfile.console   # Streamlit three-pane console
+    environment:
+      CAUSA_API_URL: "http://causa-api:8000"
+    ports:
+      - "8501:8501"
+    depends_on: [causa-api]
+    networks: [causa]

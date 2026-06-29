@@ -1,0 +1,12 @@
+{
+  "name": "causa-sdk-runner",
+  "private": true,
+  "type": "module",
+  "description": "Cursor Agent SDK smoke-test (precursor to the Phase 3 runner).",
+  "scripts": {
+    "smoke": "node smoke-test.mjs"
+  },
+  "dependencies": {
+    "@cursor/sdk": "latest"
+  }
+}

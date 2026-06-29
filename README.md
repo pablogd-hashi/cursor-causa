@@ -15,8 +15,10 @@ optional, engineer-approved downstream step.
 
 ## Status
 
-Phase 0 (scope, substrate proposal, and the RCA contract) is complete. The build
-is phased; see [the plan](#phases) below and `architecture.md`.
+Phases 0–1 complete. Phase 0 defined the scope and the RCA contract; Phase 1
+stood up the demo substrate and fired a real alert end-to-end (p99 ~2.45s at pool
+10, `PaymentsHighLatencyP99` delivered to Alertmanager). The build is phased; see
+[the plan](#phases) below and `architecture.md`.
 
 ## What is here after Phase 0
 
@@ -31,6 +33,9 @@ is phased; see [the plan](#phases) below and `architecture.md`.
 | `topology.yaml` | Declared service dependency graph (blast radius). |
 | `architecture.md` | Division of labour, seams, deferred scope. |
 | `docs/decisions-and-fde-mapping.md` | Every decision, its tradeoff, and how it maps to the FDE challenge. |
+| `demo-app/` | The instrumented `payments` service: `pool.py` (the regression), `api.py`, `telemetry.py`, and `tests/test_pool_exhaustion.py` (the oracle test). |
+| `observability/` | Lifted OTel Collector, Prometheus + alert rule, Alertmanager, Loki, and Grafana provisioning + the Payments dashboard. |
+| `break.sh` / `fix.sh` | Induce the pool-exhaustion incident / restore a healthy pool. |
 
 ## Quick check (Phase 0)
 
@@ -48,11 +53,32 @@ python3 -m venv .venv && ./.venv/bin/pip install "pydantic>=2,<3" pyyaml
 docker compose config --quiet && echo ok
 ```
 
+## Run the substrate (Phase 1)
+
+```bash
+# bring up the observability stack + payments app
+docker compose up -d --build otel-collector prometheus alertmanager loki jaeger grafana demo-app
+
+# run the oracle test (passes healthy; fails at pool 10)
+cd demo-app && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m pytest -q                 # PASS  (pool 50)
+POOL_MAX_SIZE=10 ./.venv/bin/python -m pytest -q  # FAIL (pool 10)
+cd ..
+
+# induce the incident and watch the alert fire, then restore
+./break.sh        # shrinks the pool to 10 and drives load
+./fix.sh          # restores pool 50
+```
+
+URLs: Prometheus alerts http://localhost:9090/alerts · Alertmanager
+http://localhost:9093 · Grafana http://localhost:3000/d/payments/payments ·
+Jaeger http://localhost:16686 . Stop everything with `docker compose down`.
+
 ## Phases
 
-0. **Scope + contract** (this commit).
-1. Demo substrate: instrumented `payments` app with a pool-exhaustion path, the
-   OTel pipeline, a Prometheus alert rule. A real alert fires first.
+0. **Scope + contract** — done.
+1. **Demo substrate** — done. Instrumented `payments` app with a pool-exhaustion
+   path, the OTel pipeline, a Prometheus alert rule. A real alert fires first.
 2. Triage: Grafana + GitHub MCP-client adapters, the brief assembler, the
    `TopologySource` interface + declared-graph implementation.
 3. Investigator: the interface, `MockInvestigator` first, then the Node

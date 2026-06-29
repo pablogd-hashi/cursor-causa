@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "grafana": {
+      "command": "mcp-grafana",
+      "args": ["--disable-write"],
+      "env": {
+        "GRAFANA_URL": "${GRAFANA_URL}",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "${GRAFANA_SERVICE_ACCOUNT_TOKEN}"
+      }
+    },
+    "github": {
+      "command": "github-mcp-server",
+      "args": ["stdio", "--read-only", "--toolsets", "repos,pull_requests"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+# The alert that starts the whole workflow. When the p99 of the charge handler
+# stays above 1s for a minute, PaymentsHighLatencyP99 fires and Alertmanager
+# posts it to Causa's webhook.
+#
+# Only the payments service emits payments_request_duration_seconds, so no
+# service-label filter is needed here.
+
+groups:
+  - name: payments
+    rules:
+      - alert: PaymentsHighLatencyP99
+        expr: >
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(payments_request_duration_seconds_bucket[1m]))
+          ) > 1
+        for: 1m
+        labels:
+          severity: page
+          service: payments
+        annotations:
+          summary: "payments p99 latency above 1s"
+          description: >
+            p99 of the payments charge handler has exceeded 1s for over a minute.
+            Suspected connection-pool exhaustion. Time window and metric signature
+            are the inputs to the Causa investigation brief.

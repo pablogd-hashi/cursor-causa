@@ -1,0 +1,22 @@
+# Alertmanager routes every firing alert to a single webhook receiver: Causa's
+# FastAPI endpoint. In Phase 1 causa-api is not yet running, so delivery will
+# fail and Alertmanager will retry — that is expected. The point of Phase 1 is
+# that a *real* alert fires (visible at :9090/alerts and :9093); wiring the
+# webhook consumer is Phase 4.
+#
+# The shared-secret / Bearer verification (CAUSA_WEBHOOK_SECRET) is added in
+# Phase 4 once causa-api exists to check it. Alertmanager does not interpolate
+# environment variables in this file.
+
+route:
+  receiver: causa
+  group_by: ['alertname', 'service']
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  - name: causa
+    webhook_configs:
+      - url: http://causa-api:8000/webhook/alert
+        send_resolved: true
