@@ -2,20 +2,45 @@
 
 ## Cursor Cloud specific instructions
 
-Causa is a phased prototype (Phases 0–1 complete; see `README.md` and
-`architecture.md`). Only the demo substrate is runnable today: the `causa` RCA
-contract, the `demo-app` payments service + oracle test, the Docker
-observability stack, and the `sdk-runner` Cursor SDK smoke-test. The
-`causa-api` / `causa-console` services in `docker-compose.yml` are **not built
-yet** (no `Dockerfile.api` / `Dockerfile.console`), so `docker compose up`
-without an explicit service list will fail. Only bring up the documented
-subset.
+Causa is a phased prototype (Phases 0–5 complete, Phase 6 pending; see
+`README.md` and `architecture.md`). The whole product now runs locally **on
+mocks with no secrets**: the `causa` RCA contract, the triage → brief →
+investigation → RCA pipeline (`python -m causa.demo`), the FastAPI results API
++ Streamlit three-pane console (`./run-local.sh`), the `demo-app` payments
+service + oracle test, the Docker observability stack, and the `sdk-runner`
+Cursor SDK smoke-test.
+
+`Dockerfile.api` / `Dockerfile.console` now exist, so the `causa-api` /
+`causa-console` images are buildable. Note their build runs `apt`/`npm` and so
+needs network egress, and the live MCP/Cursor paths still need secrets at
+runtime. For day-to-day development of the Causa app prefer `./run-local.sh`
+(API on `:8000`, console on `:8501`, mock triage + mock investigator). For the
+observability substrate, bring up the explicit service list documented in the
+"Run the substrate" section of `README.md` rather than a bare
+`docker compose up`.
+
+### Causa app (API + console, runs on mocks)
+
+- End-to-end mock pipeline (prints triage brief, live feed, validated RCA):
+  `./.venv/bin/python -m causa.demo`.
+- API + console together: `./run-local.sh`. Open the console at
+  `http://localhost:8501` and click **Simulate payments alert**; the right pane
+  fills with a contract-valid RCA (confidence ~0.86, action `staged_rollout`).
+  Needs no secrets — `CAUSA_TRIAGE`/`CAUSA_INVESTIGATOR` default to mocks. Set
+  `CAUSA_INVESTIGATOR=cursor` + `CURSOR_API_KEY` only for a real cloud run.
+- The investigation runs on a background thread and the mock completes in well
+  under a second, so the console shows it already `complete` after the first
+  ~1.5s auto-refresh — you will rarely catch a visible "running" state.
+- No dedicated Python linter is configured; the contract/schema/compile "Quick
+  check" block in `README.md` is the lightweight gate.
 
 ### Python (causa contract + demo-app)
 
 A single root virtualenv at `.venv` is created by the update script and holds
-both the contract deps (`pydantic`, `pyyaml`) and the `demo-app` requirements,
-so it serves both packages. Standard commands (from `README.md`):
+the full root `requirements.txt` (contract + API + console: `pydantic`,
+`pyyaml`, `fastapi`, `uvicorn`, `streamlit`, `requests`) plus the `demo-app`
+requirements, so it serves every Python package here. Standard commands (from
+`README.md`):
 
 - Validate fixture / regenerate schema: see the "Quick check" block in `README.md`.
 - Oracle test: from `demo-app/`, `../.venv/bin/python -m pytest -q`. It is
