@@ -1,12 +1,13 @@
-# Alertmanager routes every firing alert to a single webhook receiver: Causa's
-# FastAPI endpoint. In Phase 1 causa-api is not yet running, so delivery will
-# fail and Alertmanager will retry — that is expected. The point of Phase 1 is
-# that a *real* alert fires (visible at :9090/alerts and :9093); wiring the
-# webhook consumer is Phase 4.
+# Alertmanager routes every firing alert to Causa's webhook. The URL uses
+# host.docker.internal so it reaches causa-api whether it runs locally
+# (./run-local.sh / ./demo.sh on the host) or in compose (it publishes :8000).
+# host.docker.internal works on Docker Desktop (macOS/Windows); on Linux add
+#   extra_hosts: ["host.docker.internal:host-gateway"]
+# to the alertmanager service in docker-compose.yml.
 #
-# The shared-secret / Bearer verification (CAUSA_WEBHOOK_SECRET) is added in
-# Phase 4 once causa-api exists to check it. Alertmanager does not interpolate
-# environment variables in this file.
+# A shared-secret Bearer can be added here once CAUSA_WEBHOOK_SECRET is set; the
+# API verifies it. Alertmanager does not interpolate env vars in this file, so
+# the token would be written literally if used.
 
 route:
   receiver: causa
@@ -18,5 +19,5 @@ route:
 receivers:
   - name: causa
     webhook_configs:
-      - url: http://causa-api:8000/webhook/alert
+      - url: http://host.docker.internal:8000/webhook/alert
         send_resolved: true

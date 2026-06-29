@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "comment": "Run from Cursor: Command Palette -> 'Tasks: Run Task'. Cursor reads this VS Code tasks file, so you can drive the whole demo from the IDE without typing.",
+  "tasks": [
+    {
+      "label": "Causa: demo (end-to-end)",
+      "type": "shell",
+      "command": "./demo.sh",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Causa: console only",
+      "type": "shell",
+      "command": "./run-local.sh",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Causa: pipeline (mock, no servers)",
+      "type": "shell",
+      "command": "./.venv/bin/python -m causa.demo",
+      "problemMatcher": []
+    },
+    {
+      "label": "Causa: fire alert (break)",
+      "type": "shell",
+      "command": "./break.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Causa: heal (fix)",
+      "type": "shell",
+      "command": "./fix.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Causa: investigate live (Cursor cloud agent)",
+      "type": "shell",
+      "command": "CAUSA_INVESTIGATOR=cursor ./.venv/bin/python -m causa.demo",
+      "problemMatcher": [],
+      "options": {
+        "env": { "CURSOR_API_KEY": "${env:CURSOR_API_KEY}" }
+      }
+    }
+  ]
+}
