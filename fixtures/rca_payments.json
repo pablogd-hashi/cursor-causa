@@ -13,31 +13,31 @@
       "timestamp": "2025-03-17T02:09:00Z",
       "kind": "deploy",
       "label": "Deploy of payments @ a1b2c3d (PR #482 merged 01:58)",
-      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/pull/482"
+      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/pulls"
     },
     {
       "timestamp": "2025-03-17T02:11:30Z",
       "kind": "metric_inflection",
       "label": "payments_pool_inuse saturates at max_size=10; wait queue begins growing",
-      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=1742176200000&to=1742178000000"
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=now-1h&to=now"
     },
     {
       "timestamp": "2025-03-17T02:14:00Z",
       "kind": "alert",
       "label": "PaymentsHighLatencyP99 fired (p99 > 1s for 3m)",
-      "deeplink": "http://localhost:3000/alerting/list"
+      "deeplink": "http://localhost:9090/alerts"
     }
   ],
   "evidence": [
     {
       "source": "github",
       "detail": "PR #482 'tune pool sizing' changed POOL_MAX_SIZE from 50 to 10 in demo-app/payments/pool.py; merged 01:58, only change in the 30m pre-alert window touching payments.",
-      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/pull/482/files"
+      "deeplink": "https://github.com/pablogd-hashi/cursor-causa/blob/main/demo-app/payments/pool.py"
     },
     {
       "source": "grafana",
       "detail": "payments_pool_inuse pinned at 10 (==max) from 02:11; payments_pool_wait_seconds p99 climbs in lockstep with request latency.",
-      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4"
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=now-1h&to=now"
     },
     {
       "source": "code",
@@ -75,13 +75,13 @@
       "signal": "payments_pool_inuse",
       "query": "max(payments_pool_inuse{service=\"payments\"})",
       "observation": "Flatlines at 10 from 02:11, i.e. the pool is fully saturated.",
-      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=1742176200000&to=1742178000000"
+      "deeplink": "http://localhost:3000/d/payments/payments?viewPanel=4&from=now-1h&to=now"
     },
     {
       "signal": "payments_request_duration_seconds",
       "query": "histogram_quantile(0.99, sum by (le) (rate(payments_request_duration_seconds_bucket[1m])))",
       "observation": "p99 rises from 0.18s to 9.2s starting 02:11, two minutes after the deploy.",
-      "deeplink": "http://localhost:16686/trace/example-slow-charge-trace"
+      "deeplink": "http://localhost:16686/search?service=payments&lookback=1h"
     }
   ],
   "blast_radius": {

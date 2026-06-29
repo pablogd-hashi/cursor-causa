@@ -10,6 +10,8 @@ from ..brief import CandidateChange, IncidentWindow, MetricSignature, RepoTarget
 from .base import GitHubSource, GrafanaSource
 
 _GRAFANA = "http://localhost:3000/d/payments/payments"
+# Relative window so the panels always land on current data while the demo runs.
+_WIN = "&from=now-1h&to=now"
 
 
 class MockGrafanaSource(GrafanaSource):
@@ -22,7 +24,7 @@ class MockGrafanaSource(GrafanaSource):
                 query="max(payments_pool_inuse)",
                 observation="Saturates at 10 (== max) from the inflection point; "
                 "the pool is fully checked out.",
-                deeplink=f"{_GRAFANA}?viewPanel=4",
+                deeplink=f"{_GRAFANA}?viewPanel=4{_WIN}",
             ),
             MetricSignature(
                 name="payments_request_duration_seconds",
@@ -30,7 +32,7 @@ class MockGrafanaSource(GrafanaSource):
                 "(rate(payments_request_duration_seconds_bucket[1m])))",
                 observation="p99 rises from ~0.18s to >2s, tripping "
                 "PaymentsHighLatencyP99.",
-                deeplink=f"{_GRAFANA}?viewPanel=1",
+                deeplink=f"{_GRAFANA}?viewPanel=1{_WIN}",
             ),
             MetricSignature(
                 name="payments_pool_wait_seconds",
@@ -38,7 +40,7 @@ class MockGrafanaSource(GrafanaSource):
                 "(rate(payments_pool_wait_seconds_bucket[1m])))",
                 observation="Wait-to-acquire p99 climbs in lockstep with request "
                 "latency — the queueing is on the pool.",
-                deeplink=f"{_GRAFANA}?viewPanel=3",
+                deeplink=f"{_GRAFANA}?viewPanel=3{_WIN}",
             ),
         ]
 
@@ -50,10 +52,13 @@ class MockGitHubSource(GitHubSource):
         base = repo.url.rstrip("/")
         return [
             CandidateChange(
-                ref="#482",
-                title="tune pool sizing",
+                ref="pool.py",
+                title="POOL_MAX_SIZE lowered 50 -> 10",
                 merged_at=window.end,
-                url=f"{base}/pull/482",
+                # Links to the actual implicated file (resolvable). For a fully
+                # authentic demo, create a real PR making this change and point
+                # here at it, or use CAUSA_TRIAGE=mcp to list real PRs.
+                url=f"{base}/blob/main/demo-app/payments/pool.py",
                 files=["demo-app/payments/pool.py"],
             ),
             # A genuine but irrelevant change in the window — triage surfaces it,
