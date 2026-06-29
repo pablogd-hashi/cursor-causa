@@ -15,10 +15,13 @@ optional, engineer-approved downstream step.
 
 ## Status
 
-Phases 0–1 complete. Phase 0 defined the scope and the RCA contract; Phase 1
-stood up the demo substrate and fired a real alert end-to-end (p99 ~2.45s at pool
-10, `PaymentsHighLatencyP99` delivered to Alertmanager). The build is phased; see
-[the plan](#phases) below and `architecture.md`.
+Phases 0–5 complete. 0: scope + RCA contract. 1: demo substrate + a real alert
+(p99 ~2.45s at pool 10, `PaymentsHighLatencyP99` to Alertmanager). 2: triage
+(Grafana/GitHub adapters, `TopologySource`, brief assembler). 3: investigator
+interface — `MockInvestigator` + `CursorInvestigator` (the latter verified against
+a real cloud run that returned a contract-valid RCA). 4: FastAPI webhook + results
+API + orchestration. 5: the Streamlit three-pane console. Phase 6 (demo.sh +
+troubleshooting) remains. See [the plan](#phases) below and `architecture.md`.
 
 ## What is here after Phase 0
 
@@ -74,18 +77,41 @@ URLs: Prometheus alerts http://localhost:9090/alerts · Alertmanager
 http://localhost:9093 · Grafana http://localhost:3000/d/payments/payments ·
 Jaeger http://localhost:16686 . Stop everything with `docker compose down`.
 
+## Run the pipeline (Phases 2–3)
+
+End to end, on mocks (no Grafana/GitHub/Cursor needed) — prints the triage brief,
+the live investigation feed, and the validated RCA:
+
+```bash
+./.venv/bin/python -m causa.demo
+```
+
+Switch backends with env vars:
+`CAUSA_TRIAGE=mcp` (read-only Grafana/GitHub MCP servers) and
+`CAUSA_INVESTIGATOR=cursor` (a real Cursor cloud agent; needs `CURSOR_API_KEY`).
+
+## Run the console (Phases 4–5)
+
+```bash
+./run-local.sh          # starts the FastAPI API (:8000) and the console (:8501)
+```
+Open http://localhost:8501 and click **Simulate payments alert**. Left pane =
+alerts, centre = the live investigation feed, right = the RCA with deep-links and
+the optional "Open Draft PR" button. Add `CAUSA_INVESTIGATOR=cursor` +
+`CURSOR_API_KEY=...` before `./run-local.sh` to drive a real cloud agent.
+
 ## Phases
 
 0. **Scope + contract** — done.
 1. **Demo substrate** — done. Instrumented `payments` app with a pool-exhaustion
    path, the OTel pipeline, a Prometheus alert rule. A real alert fires first.
-2. Triage: Grafana + GitHub MCP-client adapters, the brief assembler, the
-   `TopologySource` interface + declared-graph implementation.
-3. Investigator: the interface, `MockInvestigator` first, then the Node
+2. **Triage** — done. Grafana + GitHub source adapters (mock + MCP), the brief
+   assembler, the `TopologySource` interface + declared-graph implementation.
+3. **Investigator** — done. The interface, `MockInvestigator`, and the Node
    `@cursor/sdk` runner + `CursorInvestigator` with streaming.
-4. Orchestration: FastAPI webhook + results API.
-5. Console: the Streamlit three-pane investigation console.
-6. End-to-end demo, docs, troubleshooting.
+4. **Orchestration** — done. FastAPI webhook + results API + background runner.
+5. **Console** — done. The Streamlit three-pane investigation console.
+6. End-to-end demo (`demo.sh`), docs, troubleshooting.
 
 ## Conventions
 

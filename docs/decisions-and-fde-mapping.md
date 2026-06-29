@@ -291,6 +291,95 @@ and `PaymentsHighLatencyP99` reached Alertmanager.
 
 ---
 
+## Phase 2 — triage decisions
+
+### 2.1 Prompt construction lives in one place
+The brief is a typed model (`InvestigationBrief`) and `brief.to_agent_prompt()`
+renders it plus the JSON Schema. The hand-written prompt from the smoke-test is
+gone. **FDE mapping:** the agent receives a reproducible, auditable input, not an
+ad-hoc string — the prerequisite for putting this in a real workflow.
+
+### 2.2 Per-source graceful degradation
+Each triage source is wrapped independently; a failure is recorded in the brief's
+`degraded` list and the investigation still launches with a partial brief.
+**FDE mapping:** at 02:14 a flaky Grafana must not block the investigation. This
+is the "degrade, never crash" guardrail made concrete.
+
+### 2.3 Triage surfaces noise on purpose
+The mock GitHub source returns both the real culprit (`#482`) and an irrelevant
+change in the window (`#2`, the pytest bump — the actual Dependabot PR). **FDE
+mapping:** the value of the Cloud Agent is *discrimination* — it must rule the
+noise out by reading code and running tests, not just list what changed. Handing
+it a clean single suspect would hide the capability being sold.
+
+### 2.4 Mocks mirror live output
+`MockGrafanaSource` / `MockGitHubSource` return the same shapes (and deep-links)
+the MCP path would. **FDE mapping:** a mock-driven demo looks identical to a live
+one, so reliability never costs fidelity.
+
+## Phase 3 — investigator decisions
+
+### 3.1 Normalised JSONL between Node and Python
+The Node runner translates the SDK's events into a small, stable JSONL vocabulary
+(`status/thinking/tool_call/assistant/rca/error`) that Causa consumes. **FDE
+mapping:** the beta SDK's event shapes can change without touching Causa or the
+console; the integration is insulated at one seam.
+
+### 3.2 The RCA comes from `result.result`, not the stream
+The smoke-test showed the final contract object lives in
+`getRun().wait().result`. The runner reads it there and emits one `rca` event;
+the streamed deltas drive only the live feed. **FDE mapping:** separating "what to
+show live" from "the authoritative result" avoids reconstructing structured output
+from token deltas — a real robustness win observed from real data.
+
+### 3.3 Contract validation is enforced on the Python side
+`CursorInvestigator` validates the agent's JSON against `causa.contract.RCA`;
+failure becomes an `error` event, never a rendered finding. **FDE mapping:** the
+trust boundary sits in Causa, not in the agent's goodwill — exactly where an
+enterprise needs it.
+
+### 3.4 One interface, env-selected backend
+`get_investigator()` returns `MockInvestigator` by default and
+`CursorInvestigator` under `CAUSA_INVESTIGATOR=cursor`; likewise `CAUSA_TRIAGE`
+for sources. **FDE mapping:** the same code path demos offline and runs live, and
+the live pieces can be enabled one at a time.
+
+---
+
+## Phase 4–5 — orchestration and console decisions
+
+### 4.1 Webhook returns immediately; the investigation runs on a thread
+A live cloud run takes minutes, so `/webhook/alert` starts a daemon thread and
+returns. **FDE mapping:** Alertmanager (and any real caller) gets a fast ack; the
+slow work happens out of band, as a production webhook consumer must behave.
+
+### 4.2 A manual trigger endpoint alongside the webhook
+`POST /investigations` starts an investigation without Alertmanager, so the demo
+can begin on a button press. **FDE mapping:** removes a live-infra dependency from
+the riskiest moment of the demo while keeping the real webhook path intact.
+
+### 4.3 The store is the event log the console reads
+Events are appended to an in-memory record as they stream; the console polls the
+record. **FDE mapping:** the same shape as a durable event log + database in
+production; swapping the store out doesn't touch the orchestrator or console.
+
+### 5.1 The console holds no state; it renders the API
+Streamlit reads investigations and events from the API and renders three panes.
+**FDE mapping:** the UI is a thin view over the contract — the valuable, testable
+part is the API and the RCA, not the front-end.
+
+### 5.2 Deep-links, not embedded dashboards
+Evidence and telemetry render as links into Grafana/Jaeger/GitHub. **FDE mapping:**
+the console is an investigation surface, not a dashboard; one click takes the
+engineer to the authoritative view to verify a claim.
+
+### 5.3 The "Open Draft PR" button is opt-in and usually absent
+It shows only when the RCA carries a `draft_pr`; otherwise the console states the
+RCA is the product. **FDE mapping:** reinforces decision-support over autonomous
+change, and honours the no-auto-PR rule end to end.
+
+---
+
 ## One-line summary to carry into the room
 
 Causa uses deterministic triage to frame an incident, then uses the Cursor Cloud

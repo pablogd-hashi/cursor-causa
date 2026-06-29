@@ -1,0 +1,26 @@
+# Causa API (FastAPI webhook + results + orchestration).
+#
+# Bundles Node 20 and @cursor/sdk so CursorInvestigator can shell out to the
+# sdk-runner. The mcp-grafana / github-mcp-server binaries (for CAUSA_TRIAGE=mcp)
+# would be added here too; omitted until that path is exercised.
+FROM python:3.12-slim
+
+# Node for the sdk-runner.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY causa ./causa
+COPY sdk-runner ./sdk-runner
+COPY topology.yaml ./
+COPY schema ./schema
+COPY fixtures ./fixtures
+RUN cd sdk-runner && npm install --omit=dev
+
+EXPOSE 8000
+CMD ["uvicorn", "causa.api:app", "--host", "0.0.0.0", "--port", "8000"]

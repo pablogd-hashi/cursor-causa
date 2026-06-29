@@ -21,8 +21,10 @@ node_modules/
 npm-debug.log*
 package-lock.json
 
-# Investigation output written by the SDK smoke-test.
+# Output written by the SDK smoke-test.
 sdk-runner/rca-output.json
+sdk-runner/events.jsonl
+sdk-runner/result.json
 
 # --- Local data / logs -------------------------------------------------------
 *.log

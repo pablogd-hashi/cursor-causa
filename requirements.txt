@@ -1,0 +1,15 @@
+# Causa orchestrator + console.
+pydantic>=2,<3
+pyyaml==6.0.2
+
+# API (Phase 4)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Console (Phase 5)
+streamlit==1.41.1
+requests==2.32.3
+
+# Triage over MCP (CAUSA_TRIAGE=mcp). Optional; only needed for the live MCP
+# path, which also requires the mcp-grafana and github-mcp-server binaries.
+# mcp>=1.2.0
