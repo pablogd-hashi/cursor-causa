@@ -1,0 +1,13 @@
+# Optional: live MCP triage (CAUSA_TRIAGE=mcp). Install into the same venv as
+# the app:  ./.venv/bin/pip install -r requirements-mcp.txt
+#
+# starlette is pinned so FastAPI (which needs <0.42) keeps working. The MCP
+# *stdio client* we use does not import starlette at runtime (starlette is only
+# for MCP's SSE server), so the pin is safe despite pip's resolver warning.
+mcp
+starlette>=0.40,<0.42
+
+# Also requires the Grafana MCP server binary on PATH (or at ~/go/bin):
+#   go install github.com/grafana/mcp-grafana/cmd/mcp-grafana@latest
+# Auth: GRAFANA_SERVICE_ACCOUNT_TOKEN, or GRAFANA_USERNAME/GRAFANA_PASSWORD
+# (defaults to admin/admin for the local stack).

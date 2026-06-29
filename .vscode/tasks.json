@@ -10,6 +10,15 @@
       "presentation": { "reveal": "always", "panel": "dedicated" }
     },
     {
+      "label": "Causa: demo LIVE (Cursor agent + console)",
+      "comment": "Export CURSOR_API_KEY in your shell once, then run this task.",
+      "type": "shell",
+      "command": "CAUSA_TRIAGE=mcp CAUSA_INVESTIGATOR=cursor CURSOR_TARGET_REF=regression/lower-pool-size ./demo.sh",
+      "options": { "env": { "CURSOR_API_KEY": "${env:CURSOR_API_KEY}" } },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
       "label": "Causa: console only",
       "type": "shell",
       "command": "./run-local.sh",

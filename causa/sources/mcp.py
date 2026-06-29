@@ -1,132 +1,178 @@
-"""MCP-backed triage sources (the production path).
+"""MCP-backed triage sources.
 
-Causa acts as an MCP client, spawning the read-only Grafana and GitHub MCP
-servers over stdio per ``.mcp.json`` and calling their tools. This is the
-faithful "MCP-driven triage" implementation; the Grafana server's
-``generate_deeplink`` tool is what builds the console's panel links.
+``McpGrafanaSource`` is live: it spawns the read-only ``mcp-grafana`` server over
+stdio (the Python ``mcp`` client) and calls its real tools — ``query_prometheus``
+for the metric signature and ``generate_deeplink`` for the panel links. This is
+genuine MCP, not a stub.
 
-Status: this requires the ``mcp`` Python package and the ``mcp-grafana`` /
-``github-mcp-server`` binaries on PATH (baked into the causa-api image in a
-later phase). Until then it raises on use and the brief assembler degrades
-gracefully to whatever sources are available. Tool names below match the
-servers' documented tools but should be confirmed against ``session.list_tools()``
-on first wiring — that is why ``_call`` looks tools up before calling.
+``McpGitHubSource`` is the same pattern for ``github-mcp-server``; it needs that
+binary on PATH and a token. Until that is set up, the factory pairs the live
+Grafana source with the mock GitHub source, and the brief assembler degrades any
+source that is unavailable.
+
+Selected via ``CAUSA_TRIAGE=mcp``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
+import shutil
 
 from ..brief import CandidateChange, IncidentWindow, MetricSignature, RepoTarget
 from .base import GitHubSource, GrafanaSource
 
+_PROM_UID = os.environ.get("GRAFANA_PROM_UID", "prometheus")
+_DASHBOARD = os.environ.get("GRAFANA_DASHBOARD_UID", "payments")
+_WINDOW = "&from=now-1h&to=now"
 
-async def _call(command: str, args: list[str], env: dict, tool: str, params: dict):
-    """Spawn an MCP server over stdio, initialise, and call one tool."""
+# PromQL the triage runs. p99 of the charge handler, and pool saturation.
+_P99_EXPR = (
+    "histogram_quantile(0.99, sum by (le) "
+    "(rate(payments_request_duration_seconds_bucket[5m])))"
+)
+_INUSE_EXPR = "max(payments_pool_inuse)"
+
+
+def _grafana_bin() -> str:
+    return (
+        os.environ.get("GRAFANA_MCP_BIN")
+        or shutil.which("mcp-grafana")
+        or os.path.expanduser("~/go/bin/mcp-grafana")
+    )
+
+
+def _grafana_env() -> dict:
+    env = {**os.environ, "GRAFANA_URL": os.environ.get("GRAFANA_URL", "http://localhost:3000")}
+    # Prefer a service-account token; fall back to basic auth (local Grafana).
+    if not os.environ.get("GRAFANA_SERVICE_ACCOUNT_TOKEN"):
+        env.setdefault("GRAFANA_USERNAME", os.environ.get("GRAFANA_USERNAME", "admin"))
+        env.setdefault("GRAFANA_PASSWORD", os.environ.get("GRAFANA_PASSWORD", "admin"))
+    return env
+
+
+def _first_text(result) -> str:
+    for block in result.content:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    return ""
+
+
+def _scalar(result) -> float | None:
+    """Pull the single value out of a query_prometheus instant result."""
     try:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-    except ImportError as exc:  # package not installed yet
-        raise RuntimeError(f"mcp client not installed: {exc}") from exc
-
-    server = StdioServerParameters(command=command, args=args, env={**os.environ, **env})
-    async with stdio_client(server) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            available = {t.name for t in (await session.list_tools()).tools}
-            if tool not in available:
-                raise RuntimeError(f"tool '{tool}' not offered by {command}; saw {sorted(available)}")
-            result = await session.call_tool(tool, params)
-            # MCP returns content blocks; the first text block carries the payload.
-            for block in result.content:
-                if getattr(block, "type", None) == "text":
-                    return json.loads(block.text)
-            return None
+        data = json.loads(_first_text(result)).get("data", [])
+        return float(data[0]["value"][1])
+    except (json.JSONDecodeError, IndexError, KeyError, ValueError, TypeError):
+        return None
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def _fmt(value: float | None, unit: str = "") -> str:
+    if value is None or math.isnan(value):
+        return "no data in window"
+    return f"{value:.2f}{unit}"
 
 
 class McpGrafanaSource(GrafanaSource):
-    def __init__(self) -> None:
-        self._env = {
-            "GRAFANA_URL": os.environ.get("GRAFANA_URL", "http://localhost:3000"),
-            "GRAFANA_SERVICE_ACCOUNT_TOKEN": os.environ.get(
-                "GRAFANA_SERVICE_ACCOUNT_TOKEN", ""
-            ),
-        }
-
     def metric_signatures(
         self, service: str, window: IncidentWindow
     ) -> list[MetricSignature]:
-        # Query the incident's headline metric, then ask Grafana for a deeplink.
-        query = (
-            "histogram_quantile(0.99, sum by (le) "
-            "(rate(payments_request_duration_seconds_bucket[1m])))"
+        return asyncio.run(self._collect())
+
+    async def _collect(self) -> list[MetricSignature]:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=_grafana_bin(), args=["--disable-write"], env=_grafana_env()
         )
-        data = _run(
-            _call(
-                "mcp-grafana",
-                ["--disable-write"],
-                self._env,
-                "query_prometheus",
-                {"query": query, "start": window.start, "end": window.end},
-            )
-        )
-        deeplink = _run(
-            _call(
-                "mcp-grafana",
-                ["--disable-write"],
-                self._env,
-                "generate_deeplink",
-                {"dashboardUid": "payments", "panelId": 1,
-                 "from": window.start, "to": window.end},
-            )
-        )
-        return [
-            MetricSignature(
-                name="payments_request_duration_seconds",
-                query=query,
-                observation=f"p99 series during the window: {json.dumps(data)[:200]}",
-                deeplink=deeplink if isinstance(deeplink, str) else None,
-            )
-        ]
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+
+                async def query(expr: str) -> float | None:
+                    res = await session.call_tool(
+                        "query_prometheus",
+                        {
+                            "datasourceUid": _PROM_UID,
+                            "expr": expr,
+                            "queryType": "instant",
+                            "endTime": "now",
+                        },
+                    )
+                    return _scalar(res)
+
+                async def panel_link(panel_id: int) -> str:
+                    res = await session.call_tool(
+                        "generate_deeplink",
+                        {
+                            "resourceType": "panel",
+                            "dashboardUid": _DASHBOARD,
+                            "panelId": panel_id,
+                        },
+                    )
+                    return _first_text(res) + _WINDOW
+
+                p99 = await query(_P99_EXPR)
+                inuse = await query(_INUSE_EXPR)
+                return [
+                    MetricSignature(
+                        name="payments_request_duration_seconds",
+                        query=_P99_EXPR,
+                        observation=f"p99 = {_fmt(p99, 's')} (live, via Grafana MCP)",
+                        deeplink=await panel_link(1),
+                    ),
+                    MetricSignature(
+                        name="payments_pool_inuse",
+                        query=_INUSE_EXPR,
+                        observation=f"in-use = {_fmt(inuse)} (live, via Grafana MCP)",
+                        deeplink=await panel_link(4),
+                    ),
+                ]
 
 
 class McpGitHubSource(GitHubSource):
-    def __init__(self) -> None:
-        self._env = {
-            "GITHUB_PERSONAL_ACCESS_TOKEN": os.environ.get(
-                "GITHUB_PERSONAL_ACCESS_TOKEN", ""
-            )
-        }
+    """Live GitHub triage over github-mcp-server. Requires that binary on PATH
+    and GITHUB_PERSONAL_ACCESS_TOKEN; raises (and the brief degrades) otherwise."""
 
     def candidate_changes(
         self, repo: RepoTarget, window: IncidentWindow
     ) -> list[CandidateChange]:
+        return asyncio.run(self._collect(repo, window))
+
+    async def _collect(self, repo: RepoTarget, window: IncidentWindow):
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        binary = shutil.which("github-mcp-server")
+        if not binary:
+            raise RuntimeError("github-mcp-server not installed")
         owner, name = repo.url.rstrip("/").split("/")[-2:]
-        prs = _run(
-            _call(
-                "github-mcp-server",
-                ["stdio", "--read-only", "--toolsets", "repos,pull_requests"],
-                self._env,
-                "list_pull_requests",
-                {"owner": owner, "repo": name, "state": "closed"},
-            )
+        params = StdioServerParameters(
+            command=binary,
+            args=["stdio", "--read-only", "--toolsets", "repos,pull_requests"],
+            env={**os.environ},
         )
-        changes: list[CandidateChange] = []
-        for pr in prs or []:
-            merged = pr.get("merged_at") or pr.get("mergedAt")
-            if merged and window.start <= merged <= window.end:
-                changes.append(
-                    CandidateChange(
-                        ref=f"#{pr.get('number')}",
-                        title=pr.get("title", ""),
-                        merged_at=merged,
-                        url=pr.get("html_url", ""),
-                    )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                res = await session.call_tool(
+                    "list_pull_requests",
+                    {"owner": owner, "repo": name, "state": "closed"},
                 )
-        return changes
+                prs = json.loads(_first_text(res)) or []
+                out: list[CandidateChange] = []
+                for pr in prs:
+                    merged = pr.get("merged_at") or pr.get("mergedAt")
+                    if merged and window.start <= merged <= window.end:
+                        out.append(
+                            CandidateChange(
+                                ref=f"#{pr.get('number')}",
+                                title=pr.get("title", ""),
+                                merged_at=merged,
+                                url=pr.get("html_url", ""),
+                            )
+                        )
+                return out

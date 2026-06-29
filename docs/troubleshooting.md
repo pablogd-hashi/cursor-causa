@@ -76,7 +76,20 @@ public beta; method names can drift. Run `sdk-runner/smoke-test.mjs`, inspect th
 
 ## Triage over MCP
 
-**`CAUSA_TRIAGE=mcp` errors.** It needs the `mcp` Python package plus the
-`mcp-grafana` and `github-mcp-server` binaries on PATH, and the relevant tokens.
-Until those are present, leave the default `CAUSA_TRIAGE=mock`; triage degrades
-gracefully and records the gap in the brief's `degraded` list.
+**Grafana triage is live** with `CAUSA_TRIAGE=mcp`. Setup:
+```bash
+go install github.com/grafana/mcp-grafana/cmd/mcp-grafana@latest   # -> ~/go/bin
+./.venv/bin/pip install -r requirements-mcp.txt                    # mcp + starlette pin
+```
+Auth uses `GRAFANA_SERVICE_ACCOUNT_TOKEN`, or falls back to
+`GRAFANA_USERNAME`/`GRAFANA_PASSWORD` (default `admin`/`admin` for the local
+stack). The adapter finds the binary on PATH or at `~/go/bin/mcp-grafana`.
+
+**`query_prometheus` returns `NaN` / "no data in window".** The metric has no
+recent samples — run some load first (the demo does this) so `rate(...[5m])` has
+data.
+
+**GitHub triage** still uses the mock source under `CAUSA_TRIAGE=mcp` because
+`github-mcp-server` isn't installed. Install that binary + set
+`GITHUB_PERSONAL_ACCESS_TOKEN` and use `CAUSA_TRIAGE=mcp-all` for both live; the
+brief degrades gracefully (recording the gap in `degraded`) if a source is down.
