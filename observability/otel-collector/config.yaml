@@ -77,6 +77,13 @@ service:
   telemetry:
     logs:
       level: info
+    # Expose the collector's own internal metrics on all interfaces (default is
+    # localhost:8888, unreachable from Prometheus on the Docker network) so the
+    # `otel-collector` scrape target in prometheus.yml comes up. The `address`
+    # key is valid for the pinned contrib v0.117.0; later versions replace it
+    # with service.telemetry.metrics.readers (a Prometheus pull reader).
+    metrics:
+      address: 0.0.0.0:8888
   pipelines:
     traces:
       receivers: [otlp]
