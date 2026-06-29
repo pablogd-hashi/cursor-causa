@@ -2,27 +2,50 @@
 
 ## Cursor Cloud specific instructions
 
-Causa is a phased prototype (Phases 0–1 complete; see `README.md` and
-`architecture.md`). Only the demo substrate is runnable today: the `causa` RCA
-contract, the `demo-app` payments service + oracle test, the Docker
-observability stack, and the `sdk-runner` Cursor SDK smoke-test. The
-`causa-api` / `causa-console` services in `docker-compose.yml` are **not built
-yet** (no `Dockerfile.api` / `Dockerfile.console`), so `docker compose up`
-without an explicit service list will fail. Only bring up the documented
-subset.
+Causa is a phased prototype (Phases 0–5 complete; see `README.md` and
+`architecture.md`). The whole pipeline runs on **mocks by default**, so the core
+product — alert → triage → investigation → validated RCA, rendered in the
+Streamlit console — needs **no external services, secrets, or Docker** to demo.
+The optional live paths (`CAUSA_TRIAGE=mcp`, `CAUSA_INVESTIGATOR=cursor`, the
+Docker observability stack, the `sdk-runner` smoke-test) need extra binaries
+and/or secrets and are out of scope for a default local setup.
 
-### Python (causa contract + demo-app)
+There is **no linter configured** (no ruff/flake8/pyproject); `./.venv/bin/python
+-m py_compile <files>` is the closest syntax check.
 
-A single root virtualenv at `.venv` is created by the update script and holds
-both the contract deps (`pydantic`, `pyyaml`) and the `demo-app` requirements,
-so it serves both packages. Standard commands (from `README.md`):
+`Dockerfile.api` / `Dockerfile.console` now exist, but building the full
+`docker compose` stack pulls Node + the MCP binaries and is only needed for the
+containerised/live path. For day-to-day dev, run the console outside Docker with
+`./run-local.sh` (below); do **not** run a bare `docker compose up` (the
+observability services still need an explicit service list — see below).
 
+### Python (causa orchestrator/console + demo-app)
+
+A single root virtualenv at `.venv` is created by the update script. It holds the
+root `requirements.txt` (pydantic, pyyaml, fastapi, uvicorn, streamlit, requests)
+**and** the `demo-app/requirements.txt` (payments service + OTel + pytest), so it
+serves both packages. (`run-local.sh` will auto-`pip install -r requirements.txt`
+into `.venv` if fastapi/streamlit are missing, but the update script already does
+this.)
+
+- Run the API + console (the core demo): `./run-local.sh` — starts the FastAPI
+ API on `:8000` and the Streamlit console on `:8501`. Open `:8501`, click
+ **Simulate payments alert**: the centre pane streams the live investigation feed
+ and the right pane renders the validated RCA (confidence ~0.86, recommended
+ `staged_rollout`, root cause = PR #482 shrinking the pool 50→10). Runs entirely
+ on mocks.
+- Run the pipeline in the terminal (no UI): `./.venv/bin/python -m causa.demo` —
+ prints triage brief, the live feed, and the RCA.
 - Validate fixture / regenerate schema: see the "Quick check" block in `README.md`.
 - Oracle test: from `demo-app/`, `../.venv/bin/python -m pytest -q`. It is
-  expected to **pass at the default pool 50 and fail under `POOL_MAX_SIZE=10`** —
-  the failure is the demo's regression, not a broken environment.
+ expected to **pass at the default pool 50 and fail under `POOL_MAX_SIZE=10`** —
+ the failure is the demo's regression, not a broken environment.
 - Run the payments app standalone: from `demo-app/`,
-  `../.venv/bin/python -m uvicorn payments.api:app --host 0.0.0.0 --port 8080`.
+ `../.venv/bin/python -m uvicorn payments.api:app --host 0.0.0.0 --port 8080`.
+
+Gotcha: the manual-trigger endpoint `POST /investigations` requires a JSON body
+(`-H 'Content-Type: application/json' -d '{}'`); a bodyless POST returns 422. The
+console sends the body for you.
 
 Gotcha: when the payments app runs **without** the OTel collector (e.g.
 standalone, not via Docker), it logs repeated `Transient error
