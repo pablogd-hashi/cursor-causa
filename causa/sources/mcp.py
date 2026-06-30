@@ -44,6 +44,25 @@ def _grafana_bin() -> str:
     )
 
 
+def _github_bin() -> str:
+    return (
+        os.environ.get("GITHUB_MCP_BIN")
+        or shutil.which("github-mcp-server")
+        or os.path.expanduser("~/go/bin/github-mcp-server")
+    )
+
+
+def _as_list(obj) -> list:
+    """github-mcp-server may return a bare array or wrap it in an object."""
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in ("pull_requests", "pullRequests", "items", "data"):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+    return []
+
+
 def _grafana_env() -> dict:
     env = {**os.environ, "GRAFANA_URL": os.environ.get("GRAFANA_URL", "http://localhost:3000")}
     # Prefer a service-account token; fall back to basic auth (local Grafana).
@@ -146,33 +165,45 @@ class McpGitHubSource(GitHubSource):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        binary = shutil.which("github-mcp-server")
-        if not binary:
-            raise RuntimeError("github-mcp-server not installed")
+        if not os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
+            raise RuntimeError("GITHUB_PERSONAL_ACCESS_TOKEN not set")
         owner, name = repo.url.rstrip("/").split("/")[-2:]
         params = StdioServerParameters(
-            command=binary,
+            command=_github_bin(),
             args=["stdio", "--read-only", "--toolsets", "repos,pull_requests"],
             env={**os.environ},
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
+                # Most-recently-updated closed PRs; we keep the merged ones. The
+                # incident window stays on the brief as context rather than a hard
+                # filter (so real merged PRs show even if outside a 30m window).
                 res = await session.call_tool(
                     "list_pull_requests",
-                    {"owner": owner, "repo": name, "state": "closed"},
+                    {
+                        "owner": owner,
+                        "repo": name,
+                        "state": "closed",
+                        "sort": "updated",
+                        "direction": "desc",
+                        "perPage": 10,
+                    },
                 )
-                prs = json.loads(_first_text(res)) or []
+                prs = _as_list(json.loads(_first_text(res) or "[]"))
                 out: list[CandidateChange] = []
                 for pr in prs:
                     merged = pr.get("merged_at") or pr.get("mergedAt")
-                    if merged and window.start <= merged <= window.end:
-                        out.append(
-                            CandidateChange(
-                                ref=f"#{pr.get('number')}",
-                                title=pr.get("title", ""),
-                                merged_at=merged,
-                                url=pr.get("html_url", ""),
-                            )
+                    if not merged:
+                        continue
+                    out.append(
+                        CandidateChange(
+                            ref=f"#{pr.get('number')}",
+                            title=pr.get("title", ""),
+                            merged_at=merged,
+                            url=pr.get("html_url") or pr.get("htmlUrl") or "",
                         )
+                    )
+                    if len(out) >= 5:
+                        break
                 return out
