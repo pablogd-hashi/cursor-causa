@@ -1,88 +1,81 @@
 # Causa
 
-Causa is a root cause analysis console. When an alert fires for the `payments`
-service, Causa does cheap, deterministic triage and then hands a structured brief
-to a **Cursor Cloud Agent**, which clones the repository, traces the implicated
-code, runs the relevant tests, and returns a validated root cause analysis that
-the console renders.
+Causa is a Cursor-driven Root Cause Analysis console. When an alert fires for the
+`payments` service, Causa does cheap, deterministic **triage** (pulling the metric
+signature from Grafana and the candidate commits/PRs from GitHub, both over MCP),
+assembles a structured **investigation brief**, and hands it to a **Cursor Cloud
+Agent**. The Cloud Agent clones the repository, traces the implicated execution
+path in the real code, runs the relevant tests in its VM, reasons about whether a
+rollback or a forward-fix is safer (using a service dependency graph for blast
+radius), and returns a strict, validated **RCA** that the console renders.
 
-The idea is to use the Cursor Cloud Agent as a codebase **investigator**, not a
-code generator: the product is the analysis. Any pull request is an optional,
-engineer-approved follow-up.
+The point of the demo is that the Cursor Cloud Agent is a **codebase
+investigator**, not a code generator. The product is the RCA; a draft PR is an
+optional, engineer-approved downstream step.
 
-Causa is read-only against every external system and never commits or pushes.
+Requires [Task](https://taskfile.dev) and Docker. Run `task` to list commands.
 
-## How it works
-
-1. A Prometheus rule (`PaymentsHighLatencyP99`) fires and Alertmanager calls
-   Causa's webhook.
-2. **Triage** (deterministic): pull the metric signature from Grafana, the
-   candidate commits/PRs from GitHub, and the service dependency graph.
-3. Causa assembles an **investigation brief**.
-4. **Investigation**: a Cursor Cloud Agent gets the brief and the repo,
-   investigates the real code, runs the test on the current and reverted code,
-   and returns an RCA that matches a strict schema.
-5. The **console** shows the alert, the live investigation feed, and the RCA with
-   deep-links into Grafana, Jaeger and GitHub.
-
-```
-alert ─▶ triage (Grafana + GitHub + topology) ─▶ brief ─▶ Cursor agent ─▶ RCA ─▶ console
-```
-
-## Run it
+## Quick start
 
 ```bash
-./demo.sh
+task setup
+task demo
 ```
 
-This brings up the stack, fires a real incident in the background (the alert
-fires in about 90 seconds and auto-starts an investigation), and launches the API
-and console. Open <http://localhost:8501> and click **Simulate payments alert**
-for an instant one, or wait for the real alert. Ctrl-C stops it; `docker compose
-down` stops the stack.
+Open http://localhost:8501 (Cursor Simple Browser). A real alert fires in ~90s
+and auto-starts an investigation. Click **Simulate payments alert** for an instant
+one. Ctrl-C stops the API and console; `task substrate:down` stops Docker.
 
-By default the investigation is **mocked** (a fixture RCA), so the demo runs with
-no external dependencies. For a real Cursor Cloud Agent:
+For a live Cursor Cloud Agent:
 
 ```bash
-CAUSA_INVESTIGATOR=cursor CURSOR_API_KEY=... ./demo.sh
+CAUSA_INVESTIGATOR=cursor CURSOR_API_KEY=sk-... task demo:cursor
 ```
 
-### Inside Cursor
-
-Cursor is a VS Code fork, so you can run it all in the IDE: Command Palette →
-*Tasks: Run Task* → `Causa: demo (end-to-end)`, then *Simple Browser: Show* →
-<http://localhost:8501>. A live cloud run also shows at <https://cursor.com/agents>
-(under the account that owns the API key).
-
-## The console
-
-- **Left** — alerts; click one, or simulate.
-- **Centre** — the incident timeline and the live investigation feed.
-- **Right** — the RCA: confidence, recommended action, blast radius, code path,
-  test results (current vs revert), and evidence/telemetry as deep-links.
-
-## Where things are
+## Layout
 
 | Path | What it is |
 |---|---|
-| `causa/contract.py` | The RCA schema the investigator must return; Causa validates against it. |
-| `demo-app/` | The instrumented `payments` service with the pool-exhaustion bug and its test. |
-| `causa/sources/` | Triage adapters for Grafana and GitHub (mock, or read-only MCP). |
-| `causa/topology.py` | The service dependency graph behind blast-radius reasoning. |
-| `causa/investigator.py` | The investigator interface: mock, or a real Cursor agent. |
-| `sdk-runner/` | The Node launcher that drives the Cursor Agent SDK. |
-| `causa/api.py`, `console/app.py` | The FastAPI backend and the Streamlit console. |
-| `observability/` | OTel Collector, Prometheus + the alert rule, Alertmanager, Loki, Grafana. |
-| `architecture.md` | Design, the seams, and what is deferred to production. |
-| `docs/troubleshooting.md` | Common snags. |
+| `causa/contract.py` | The RCA contract (Pydantic v2). The trust boundary. |
+| `schema/rca.schema.json` | JSON Schema generated from the contract; handed to the agent. |
+| `fixtures/rca_payments.json` | A valid, realistic RCA (feeds the MockInvestigator). |
+| `causa/api.py` | FastAPI orchestration API |
+| `console/app.py` | Streamlit investigation console |
+| `sdk-runner/` | Node `@cursor/sdk` runner for live investigations |
+| `demo-app/` | Instrumented `payments` service and oracle test |
+| `observability/` | OTel, Prometheus, Alertmanager, Loki, Grafana |
+| `docker-compose.yml` | Local stack topology |
+| `.mcp.json` | Read-only Grafana + GitHub MCP server definitions |
+| `.env.example` | Tokens and env vars |
+| `topology.yaml` | Service dependency graph (blast radius) |
+| `architecture.md` | Division of labour, seams, deferred scope |
+| `docs/mcp-triage.md` | When Grafana/GitHub MCP run; merge → triage flow |
+| `docs/demo-storyline.md` | Narrated demo script |
+| `docs/troubleshooting.md` | Failure modes and fixes |
 
-## Configuration
+## Common tasks
 
-| Variable | Purpose |
-|---|---|
-| `CAUSA_INVESTIGATOR` | `mock` (default) or `cursor` (live cloud agent). |
-| `CAUSA_TRIAGE` | `mock` (default) or `mcp` (read-only Grafana/GitHub MCP servers). |
-| `CURSOR_API_KEY` | Required for a live cloud run (Cursor Pro). |
+```bash
+task check              # validate fixture, regen schema, lint compose
+task substrate:up       # observability stack + demo-app only
+task test:oracle        # oracle test — pass at pool 50
+task break              # induce the incident
+task fix                # restore healthy pool
+task run:local          # API + console without full demo
+task regression:pr      # open regression PR on GitHub (merge manually for live triage)
+```
 
-See `.env.example` for the full list and how to obtain each value.
+Live MCP triage (Grafana + GitHub): see `docs/mcp-triage.md`.
+
+```bash
+CAUSA_TRIAGE=mcp task demo   # after merging the regression PR
+```
+
+URLs: Prometheus http://localhost:9090/alerts · Alertmanager
+http://localhost:9093 · Grafana http://localhost:3000/d/payments/payments ·
+Jaeger http://localhost:16686 · Console http://localhost:8501
+
+## Conventions
+
+British spelling, no marketing language, clarity over cleverness. Causa is
+read-only against every external system and never commits or pushes.

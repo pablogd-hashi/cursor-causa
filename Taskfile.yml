@@ -1,0 +1,142 @@
+version: "3"
+
+vars:
+  PY: "{{.TASKFILE_DIR}}/.venv/bin/python"
+  PIP: "{{.TASKFILE_DIR}}/.venv/bin/pip"
+  SUBSTRATE: otel-collector prometheus alertmanager loki jaeger grafana demo-app
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  setup:
+    desc: Create venv and install Python dependencies
+    cmds:
+      - test -d .venv || python3 -m venv .venv
+      - "{{.PIP}} install -r requirements.txt"
+      - "{{.PIP}} install -r demo-app/requirements.txt"
+
+  validate:
+    desc: Validate the RCA fixture against the contract
+    deps: [setup]
+    cmds:
+      - '{{.PY}} -c "from causa.contract import RCA; RCA.model_validate_json(open(\"fixtures/rca_payments.json\").read()); print(\"ok\")"'
+
+  schema:
+    desc: Regenerate schema/rca.schema.json from causa/contract.py
+    deps: [setup]
+    cmds:
+      - "{{.PY}} -m causa.contract > schema/rca.schema.json"
+
+  compose:lint:
+    desc: Lint docker-compose.yml
+    cmds:
+      - docker compose config --quiet
+      - echo ok
+
+  check:
+    desc: Run validate, schema regen, and compose lint
+    cmds:
+      - task: validate
+      - task: schema
+      - task: compose:lint
+
+  substrate:pull:
+    desc: Pre-pull Docker images for the demo stack
+    cmds:
+      - docker compose pull {{.SUBSTRATE}}
+
+  substrate:up:
+    desc: Start observability stack and demo-app
+    cmds:
+      - docker compose up -d --build {{.SUBSTRATE}}
+
+  substrate:down:
+    desc: Stop all Docker services
+    cmds:
+      - docker compose down
+
+  test:oracle:
+    desc: Run the oracle test with a healthy pool (expect pass)
+    deps: [setup]
+    dir: demo-app
+    env:
+      POOL_MAX_SIZE: "50"
+    cmds:
+      - "{{.PY}} -m pytest -q"
+
+  test:oracle:broken:
+    desc: Run the oracle test at pool 10 (expect fail — the demo regression)
+    deps: [setup]
+    dir: demo-app
+    env:
+      POOL_MAX_SIZE: "10"
+    cmds:
+      - cmd: "{{.PY}} -m pytest -q"
+        ignore_error: true
+
+  break:
+    desc: Induce pool-exhaustion incident (pool 10, load ~180s)
+    cmds:
+      - ./break.sh
+
+  fix:
+    desc: Restore healthy connection pool (default 50)
+    cmds:
+      - ./fix.sh
+
+  run:local:
+    desc: Start Causa API (:8000) and console (:8501) on the host
+    deps: [setup]
+    cmds:
+      - ./run-local.sh
+
+  demo:
+    desc: Full demo — stack, incident in background, API + console
+    deps: [setup]
+    cmds:
+      - ./demo.sh
+
+  demo:cursor:
+    desc: Full demo with live Cursor Cloud Agent (requires CURSOR_API_KEY)
+    deps: [setup]
+    env:
+      CAUSA_INVESTIGATOR: cursor
+    cmds:
+      - ./demo.sh
+
+  payments:run:
+    desc: Run the payments app standalone on :8080 (no Docker)
+    deps: [setup]
+    dir: demo-app
+    env:
+      POOL_MAX_SIZE: "50"
+    cmds:
+      - "{{.PY}} -m uvicorn payments.api:app --host 0.0.0.0 --port 8080"
+
+  sdk:install:
+    desc: Install sdk-runner Node dependencies
+    dir: sdk-runner
+    cmds:
+      - npm install
+
+  sdk:smoke:
+    desc: Run Cursor SDK smoke test (requires CURSOR_API_KEY)
+    deps: [sdk:install]
+    dir: sdk-runner
+    cmds:
+      - node smoke-test.mjs
+
+  sdk:validate:
+    desc: Validate sdk-runner/rca-output.json against the RCA contract
+    deps: [setup]
+    cmds:
+      - '{{.PY}} -c "from causa.contract import RCA; RCA.model_validate_json(open(\"sdk-runner/rca-output.json\").read()); print(\"RCA valid\")"'
+
+  regression:pr:
+    desc: Create regression PR on GitHub (merge manually, then CAUSA_TRIAGE=mcp demo)
+    cmds:
+      - ./scripts/create-regression-pr.sh

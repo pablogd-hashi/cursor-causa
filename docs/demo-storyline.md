@@ -12,8 +12,9 @@ Each beat has **SAY** (what you narrate), **DO** (what you run/click), **SEE**
 
 ## Before the room (off-screen setup)
 
-- `regression/lower-pool-size` branch is pushed (it lowers `POOL_MAX_SIZE` 50→10);
-  optionally open a PR so the link resolves.
+- Create the regression PR (merge it manually before or during the demo):
+  `task regression:pr` — then merge on GitHub. With `CAUSA_TRIAGE=mcp`, GitHub MCP
+  surfaces that merged PR when the alert fires. See `docs/mcp-triage.md`.
 - `CURSOR_API_KEY` is from the **same Cursor account** you're signed into, so the
   run shows at cursor.com/agents. Confirm:
   `curl -s https://api.cursor.com/v1/agents -u "$CURSOR_API_KEY:" | head`

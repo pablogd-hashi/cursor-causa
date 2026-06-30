@@ -28,7 +28,7 @@ from .telemetry import get_meter
 # The breakable knob. Read once at import. Default is the healthy value; the
 # regression is lowering this (or setting the env var) to a number below the
 # service's normal concurrency.
-POOL_MAX_SIZE = int(os.getenv("POOL_MAX_SIZE", "10"))
+POOL_MAX_SIZE = int(os.getenv("POOL_MAX_SIZE", "50"))
 
 
 class ConnectionPool:
