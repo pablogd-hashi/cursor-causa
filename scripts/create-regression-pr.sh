@@ -77,7 +77,7 @@ else
   if [ "$DRAFT" = "1" ]; then
     PR_ARGS+=(--draft)
   fi
-  PR_URL="$(gh pr create "${PR_ARGS[@]}")"
+  PR_URL="$(gh "${PR_ARGS[@]}")"
   echo "==> $PR_URL"
 fi
 

@@ -26,11 +26,19 @@ Open http://localhost:8501 (Cursor Simple Browser). A real alert fires in ~90s
 and auto-starts an investigation. Click **Simulate payments alert** for an instant
 one. Ctrl-C stops the API and console; `task substrate:down` stops Docker.
 
-For a live Cursor Cloud Agent:
+For a live Cursor Cloud Agent (Pro plan):
 
 ```bash
-CAUSA_INVESTIGATOR=cursor CURSOR_API_KEY=sk-... task demo:cursor
+CURSOR_RUNTIME=cloud CURSOR_TARGET_REF=regression/lower-pool-size \
+  CURSOR_API_KEY=sk-... task demo:cursor
 ```
+
+The agent clones the repo via the **Cursor GitHub app** (authorise it on the repo
+in the Cursor dashboard) — no GitHub token is needed for the investigation. A
+`GITHUB_PERSONAL_ACCESS_TOKEN` is only needed for live GitHub triage (real merged
+PRs in the brief); without it, GitHub triage uses the mock source. Point
+`CURSOR_TARGET_REF` at a ref where the bug exists. Giving the agent its own MCP
+tools: see `docs/agent-mcp.md`.
 
 ## Layout
 
@@ -45,11 +53,16 @@ CAUSA_INVESTIGATOR=cursor CURSOR_API_KEY=sk-... task demo:cursor
 | `demo-app/` | Instrumented `payments` service and oracle test |
 | `observability/` | OTel, Prometheus, Alertmanager, Loki, Grafana |
 | `docker-compose.yml` | Local stack topology |
-| `.mcp.json` | Read-only Grafana + GitHub MCP server definitions |
+| `.mcp.json` | Read-only Grafana + GitHub MCP definitions (Cursor IDE) |
+| `.cursor/mcp.json` | MCP servers offered to the Cursor agent (agent-side tools) |
+| `causa/sources/` | Triage adapters: mock + live Grafana/GitHub MCP |
+| `requirements-mcp.txt` | Python MCP client deps (for `CAUSA_TRIAGE=mcp`) |
 | `.env.example` | Tokens and env vars |
 | `topology.yaml` | Service dependency graph (blast radius) |
+| `scripts/` | Regression PR, MCP demo, and metric warm-up helpers |
 | `architecture.md` | Division of labour, seams, deferred scope |
 | `docs/mcp-triage.md` | When Grafana/GitHub MCP run; merge → triage flow |
+| `docs/agent-mcp.md` | Giving the agent its own MCP tools; local vs cloud |
 | `docs/demo-storyline.md` | Narrated demo script |
 | `docs/troubleshooting.md` | Failure modes and fixes |
 
@@ -62,13 +75,15 @@ task test:oracle        # oracle test — pass at pool 50
 task break              # induce the incident
 task fix                # restore healthy pool
 task run:local          # API + console without full demo
+task mcp:demo           # watch the Grafana/GitHub MCP tool calls happen live
 task regression:pr      # open regression PR on GitHub (merge manually for live triage)
 ```
 
-Live MCP triage (Grafana + GitHub): see `docs/mcp-triage.md`.
+Live MCP triage (Grafana + GitHub): see `docs/mcp-triage.md`; the agent's own MCP
+tools are in `docs/agent-mcp.md`.
 
 ```bash
-CAUSA_TRIAGE=mcp task demo   # after merging the regression PR
+CAUSA_TRIAGE=mcp task demo   # Grafana MCP live; GitHub MCP live with a token
 ```
 
 URLs: Prometheus http://localhost:9090/alerts · Alertmanager
