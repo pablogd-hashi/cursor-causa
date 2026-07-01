@@ -1,0 +1,18 @@
+flowchart BT
+  payments["payments (upstream)"]
+  checkout["checkout"]
+  refunds["refunds"]
+  invoice["invoice"]
+  ledger["ledger"]
+
+  checkout -->|"depends_on"| payments
+  refunds -->|"depends_on"| payments
+  invoice -->|"depends_on"| payments
+  ledger -->|"depends_on"| payments
+  ledger -->|"depends_on"| refunds
+
+  subgraph blast ["Blast radius if payments rolls back"]
+    affected["checkout, refunds, invoice, ledger"]
+  end
+
+  payments -.->|"affects"| affected

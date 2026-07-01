@@ -1,0 +1,34 @@
+flowchart TD
+  start["task demo or demo.sh"]
+  substrate["Docker substrate up"]
+  load["Load generator drives /charge"]
+  regression["POOL_MAX_SIZE=10 regression"]
+  metrics["p99 climbs, pool pinned at 10"]
+  alert["PaymentsHighLatencyP99 fires"]
+  webhook["Alertmanager webhook to causa-api"]
+  triage["Triage: Grafana + GitHub evidence"]
+  brief["Investigation brief assembled"]
+  investigate["Investigator runs"]
+  mockPath["MockInvestigator (default)"]
+  cursorPath["CursorInvestigator (CAUSA_INVESTIGATOR=cursor)"]
+  rca["Validated RCA rendered"]
+  console["Streamlit console (3 panes)"]
+  fix["task fix restores pool 50"]
+  resolve["Alert auto-resolves"]
+
+  start --> substrate
+  substrate --> load
+  load --> regression
+  regression --> metrics
+  metrics --> alert
+  alert --> webhook
+  webhook --> triage
+  triage --> brief
+  brief --> investigate
+  investigate --> mockPath
+  investigate --> cursorPath
+  mockPath --> rca
+  cursorPath --> rca
+  rca --> console
+  console --> fix
+  fix --> resolve

@@ -1,0 +1,28 @@
+flowchart LR
+  subgraph seams ["Production Seams (swap without touching engine)"]
+    topoSeam["TopologySource.dependents()"]
+    invSeam["Investigator.investigate()"]
+    llmSeam["llm.py (narration only)"]
+  end
+
+  subgraph prototype ["Prototype Implementation"]
+    declaredYaml["topology.yaml declared graph"]
+    mockInv["MockInvestigator + fixtures"]
+    cursorSdk["CursorInvestigator + sdk-runner"]
+    hostedLlm["Hosted API or Ollama"]
+  end
+
+  subgraph production ["Production (deferred)"]
+    consulMcp["Consul MCP live graph"]
+    vaultSpiffe["Vault + SPIFFE identity"]
+    causaOtel["Causa own OTel traces"]
+  end
+
+  topoSeam --> declaredYaml
+  topoSeam -.->|"future"| consulMcp
+  invSeam --> mockInv
+  invSeam --> cursorSdk
+  llmSeam --> hostedLlm
+  consulMcp -.-> topoSeam
+  vaultSpiffe -.-> prototype
+  causaOtel -.-> prototype

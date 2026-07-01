@@ -1,0 +1,29 @@
+sequenceDiagram
+  participant Payments as demo-app payments
+  participant Prom as Prometheus
+  participant AM as Alertmanager
+  participant API as causa-api
+  participant Triage as Triage MCP client
+  participant Grafana as Grafana MCP
+  participant GitHub as GitHub MCP
+  participant Topo as TopologySource
+  participant Inv as Investigator
+  participant Agent as Cursor Cloud Agent
+  participant Console as causa-console
+
+  Payments->>Prom: OTLP metrics (p99, pool in-use)
+  Prom->>AM: PaymentsHighLatencyP99 firing
+  AM->>API: POST /webhook/alert
+  API->>Triage: assemble_brief()
+  Triage->>Grafana: query_prometheus, generate_deeplink
+  Triage->>GitHub: list merged PRs in window
+  Grafana-->>Triage: metric signatures
+  GitHub-->>Triage: candidate changes
+  API->>Topo: dependents(payments)
+  Topo-->>API: blast radius services
+  API->>Inv: investigate(brief)
+  Inv->>Agent: clone repo, trace, test
+  Agent-->>Inv: JSONL event stream
+  Agent-->>API: RCA JSON
+  API->>API: validate against contract
+  API-->>Console: investigation + RCA + deeplinks

@@ -1,0 +1,51 @@
+flowchart TB
+  subgraph observability ["Observability Stack (Docker)"]
+    demoApp["demo-app / payments"]
+    otelCollector["OTel Collector"]
+    prometheus["Prometheus"]
+    alertmanager["Alertmanager"]
+    grafana["Grafana"]
+    loki["Loki"]
+    jaeger["Jaeger"]
+  end
+
+  subgraph causaPlatform ["Causa Platform (host)"]
+    causaApi["causa-api (FastAPI)"]
+    triage["Triage: assemble_brief()"]
+    topologySource["TopologySource"]
+    investigatorIface["Investigator interface"]
+    causaConsole["causa-console (Streamlit)"]
+    contract["RCA contract (Pydantic)"]
+  end
+
+  subgraph mcpSubprocesses ["MCP Subprocesses (stdio, on demand)"]
+    grafanaMcp["Grafana MCP (read-only)"]
+    githubMcp["GitHub MCP (read-only)"]
+  end
+
+  subgraph investigators ["Investigators"]
+    mockInv["MockInvestigator"]
+    cursorInv["CursorInvestigator"]
+    sdkRunner["sdk-runner (Node)"]
+    cloudAgent["Cursor Cloud Agent"]
+  end
+
+  demoApp -->|"OTLP traces/metrics"| otelCollector
+  otelCollector --> prometheus
+  otelCollector --> loki
+  otelCollector --> jaeger
+  prometheus -->|"alert rule"| alertmanager
+  alertmanager -->|"webhook HMAC"| causaApi
+  grafana -.->|"query via MCP"| grafanaMcp
+  githubMcp --> triage
+  grafanaMcp --> triage
+  causaApi --> triage
+  topologySource -->|"topology.yaml"| causaApi
+  triage -->|"investigation brief"| investigatorIface
+  investigatorIface --> mockInv
+  investigatorIface --> cursorInv
+  cursorInv --> sdkRunner
+  sdkRunner -->|"JSONL events"| cloudAgent
+  cloudAgent -->|"RCA JSON"| causaApi
+  causaApi -->|"validate"| contract
+  contract --> causaConsole

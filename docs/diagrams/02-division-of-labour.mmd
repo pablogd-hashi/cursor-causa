@@ -1,0 +1,27 @@
+flowchart LR
+  subgraph cheap ["Cheap Deterministic Triage (Causa)"]
+    alert["Alert fires"]
+    grafanaData["Grafana: metric signature + window"]
+    githubData["GitHub: commits/PRs in window"]
+    brief["Investigation brief"]
+    alert --> grafanaData
+    alert --> githubData
+    grafanaData --> brief
+    githubData --> brief
+  end
+
+  subgraph expensive ["Expensive Semantic Investigation (Cursor Cloud Agent)"]
+    clone["Clone repository"]
+    trace["Trace execution path"]
+    test["Run oracle tests (current vs reverted)"]
+    blast["Blast-radius reasoning"]
+    rca["Validated RCA"]
+    brief --> clone
+    clone --> trace
+    trace --> test
+    test --> blast
+    blast --> rca
+  end
+
+  brief -->|"brief in"| clone
+  rca -->|"contract out"| contractOut["causa/contract.py"]
