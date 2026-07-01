@@ -1,6 +1,13 @@
 {
-  "_comment": "MCP servers offered to the Cursor agent that works on this repo (IDE, local SDK run, or cloud). Read-only. The agent uses these to confirm the incident's metric signature itself (query_prometheus, generate_deeplink) and to look at merged PRs. Requires the mcp-grafana / github-mcp-server binaries on the agent's PATH and the env below set. On a local run these reach your localhost stack; a cloud run needs a reachable Grafana (tunnel or hosted). See docs/agent-mcp.md.",
+  "_comment": "MCP servers offered to the Cursor agent that works on this repo (IDE, local SDK run, or cloud). Read-only. The agent uses these to confirm the incident's metric signature itself (query_prometheus, generate_deeplink) and to look at merged PRs. Requires the mcp-grafana / github-mcp-server binaries on the agent's PATH and the env below set. On a local run these reach your localhost stack; a cloud run needs a reachable Grafana (tunnel or hosted). See docs/agent-mcp.md.\n\nThe 'causa' server lets you query live investigation state directly from the Cursor chat without opening Streamlit. Requires the Causa API to be running (task run:local). Tools: list_investigations, get_investigation, get_rca, get_latest_investigation, get_investigation_summary.",
   "mcpServers": {
+    "causa": {
+      "command": "python",
+      "args": ["-m", "causa.mcp_server"],
+      "env": {
+        "CAUSA_API_URL": "http://localhost:8000"
+      }
+    },
     "grafana": {
       "command": "mcp-grafana",
       "args": ["--disable-write"],

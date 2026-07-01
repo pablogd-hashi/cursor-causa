@@ -1,5 +1,12 @@
 {
   "mcpServers": {
+    "causa": {
+      "command": "python",
+      "args": ["-m", "causa.mcp_server"],
+      "env": {
+        "CAUSA_API_URL": "http://localhost:8000"
+      }
+    },
     "grafana": {
       "command": "mcp-grafana",
       "args": ["--disable-write"],

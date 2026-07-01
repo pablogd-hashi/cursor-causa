@@ -43,7 +43,7 @@ KIND_COLOR = {
     "metric_inflection": AMBER, "note": SLATE,
 }
 
-st.set_page_config(page_title="Causa", layout="wide")
+st.set_page_config(page_title="Causa", layout="wide", page_icon="🔍")
 
 st.markdown(
     """
@@ -59,6 +59,7 @@ st.markdown(
       .tl { padding:5px 0 5px 14px; border-left:2px solid #e2e8f0; margin-left:4px; }
       .stButton>button { border-radius:8px; }
       div[data-testid="stMetricValue"] { font-size:1.4rem; }
+      .selected-card { outline:2px solid #2563eb; border-radius:10px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -112,27 +113,33 @@ with left:
         res = api_post("/investigations")
         if res:
             st.session_state["selected"] = res["id"]
-            st.rerun()
     auto = st.checkbox("Live refresh", value=True)
     st.divider()
 
     investigations = api_get("/investigations") or []
     if not investigations:
         st.caption("No investigations yet. Simulate one, or run ./break.sh.")
+
+    _current = st.session_state.get("selected")
     for rec in investigations:
         disp = "running" if rec["status"] in RUNNING else rec["status"]
+        is_selected = rec["id"] == _current
         with st.container(border=True):
-            st.markdown(
-                f"**{rec['alertname']}** &nbsp; "
-                + badge(disp, STATUS_COLOR.get(rec["status"], SLATE)),
-                unsafe_allow_html=True,
-            )
-            st.caption(f"{rec['service']} · {rec['created_at'][11:19]}")
-            if st.button("Open", key=rec["id"], use_container_width=True):
-                st.session_state["selected"] = rec["id"]
-                st.rerun()
+            col_text, col_btn = st.columns([3, 1])
+            with col_text:
+                st.markdown(
+                    f"**{rec['alertname']}** &nbsp; "
+                    + badge(disp, STATUS_COLOR.get(rec["status"], SLATE)),
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"{rec['service']} · {rec['created_at'][11:19]}")
+            with col_btn:
+                btn_type = "primary" if is_selected else "secondary"
+                btn_label = "Viewing" if is_selected else "Open"
+                if st.button(btn_label, key=rec["id"], use_container_width=True, type=btn_type):
+                    st.session_state["selected"] = rec["id"]
     if st.session_state.get("api_error"):
-        st.caption(f"API: {st.session_state['api_error']}")
+        st.caption(f"⚠️ API: {st.session_state['api_error']}")
 
 selected = st.session_state.get("selected")
 record = api_get(f"/investigations/{selected}") if selected else None
