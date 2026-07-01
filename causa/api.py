@@ -24,6 +24,7 @@ from .store import STORE, InvestigationRecord
 app = FastAPI(title="Causa API")
 
 _DEFAULT_REPO = RepoTarget(
+    # Cloud agents clone this URL; triage GitHub MCP searches the same repo.
     url=os.environ.get("CURSOR_TARGET_REPO", "https://github.com/pablogd-hashi/cursor-causa"),
     ref=os.environ.get("CURSOR_TARGET_REF", "main"),
     subpath="demo-app/",
@@ -45,6 +46,7 @@ def _spawn(investigation_id: str, alert: AlertContext, service: str) -> None:
 
 
 def _start(alertname: str, service: str, alert: AlertContext) -> str:
+    """Create a store record and kick off ``run_investigation`` on a worker thread."""
     investigation_id = f"inv-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     STORE.create(
         InvestigationRecord(id=investigation_id, alertname=alertname, service=service)

@@ -13,6 +13,12 @@ from .base import GitHubSource, GrafanaSource
 
 
 def get_sources() -> tuple[GrafanaSource, GitHubSource]:
+    """Pick triage backends from ``CAUSA_TRIAGE``.
+
+    mock  — deterministic fixtures, no external deps (default).
+    mcp   — live Grafana MCP; GitHub MCP when binary + token are present.
+    mcp-all — both MCP sources required (no GitHub mock fallback).
+    """
     mode = os.environ.get("CAUSA_TRIAGE", "mock").lower()
     if mode in ("mcp", "mcp-all"):
         import shutil

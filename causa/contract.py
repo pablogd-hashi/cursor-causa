@@ -5,12 +5,11 @@ prompted to return JSON matching ``RCA`` exactly; Causa validates that JSON agai
 this model before anything is stored or rendered. Invalid output is rejected and
 surfaced as an error rather than displayed as if it were a real finding.
 
-Design note (for a HashiCorp infra reader): this is "brief-in / contract-out".
-A loose "investigate this" prompt produces unusable, unrepeatable output. By
-pinning the *shape* of the answer here and generating a JSON Schema from it
-(``schema/rca.schema.json``), we can hand the agent an exact target and fail
-closed when it deviates. Pydantic v2 gives us both runtime validation and the
-JSON Schema export from one definition.
+Design note: this is "brief-in / contract-out". A loose "investigate this" prompt
+produces unusable, unrepeatable output. By pinning the *shape* of the answer here
+and generating a JSON Schema from it (``schema/rca.schema.json``), we hand the
+agent an exact target and fail closed when it deviates. Pydantic v2 gives both
+runtime validation and JSON Schema export from one definition.
 """
 
 from __future__ import annotations

@@ -166,7 +166,7 @@ class CursorInvestigator(Investigator):
 
 
 def get_investigator() -> Investigator:
-    """``CAUSA_INVESTIGATOR=cursor`` for the live agent; mock by default."""
+    """``CAUSA_INVESTIGATOR=cursor`` → SDK via sdk-runner; else mock fixture."""
     if os.environ.get("CAUSA_INVESTIGATOR", "mock").lower() == "cursor":
         return CursorInvestigator()
     return MockInvestigator()

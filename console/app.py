@@ -1,13 +1,10 @@
-"""Causa console — the three-pane investigation view (Phase 5).
+"""Causa console — three-pane investigation view.
 
-LEFT: alerts / investigations (select; a button simulates an alert).
-CENTRE: the incident timeline + the live investigation feed (streamed events).
-RIGHT: the RCA — confidence, recommended action, blast radius, code path, tests,
-telemetry and evidence as deep-links, and an optional "Open Draft PR" button.
+LEFT: investigations list + simulate alert.
+CENTRE: timeline and live agent event feed (polled from the API).
+RIGHT: validated RCA with deeplinks to Grafana/GitHub.
 
-It reads everything from the Causa API (CAUSA_API_URL) and holds no state of its
-own. Styling is plain CSS injected once; colours encode status/severity/result so
-the console reads at a glance.
+Reads ``CAUSA_API_URL`` (default http://localhost:8000); holds no state of its own.
 """
 
 from __future__ import annotations

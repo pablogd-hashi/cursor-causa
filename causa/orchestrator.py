@@ -25,7 +25,12 @@ def run_investigation(
     service: str,
     repo: RepoTarget,
 ) -> None:
+    """Full pipeline for one alert: triage → investigate → store.
+
+    Called from a background thread in ``causa/api.py`` so webhooks return
+    immediately. Never raises — failures land on the investigation record."""
     try:
+        # --- Triage: cheap lookups (mock or Grafana/GitHub MCP) ---
         grafana, github = get_sources()
         topology = DeclaredTopologySource(_ROOT / "topology.yaml")
 
@@ -39,10 +44,12 @@ def run_investigation(
             github=github,
             topology=topology,
         )
+        # Brief is stored so the console can show what the agent will receive.
         STORE.update(
             investigation_id, brief=brief, status=InvestigationStatus.investigating
         )
 
+        # --- Investigation: mock replay or Cursor SDK (minutes for cloud) ---
         investigator = get_investigator()
         produced_rca = False
         for event in investigator.investigate(brief):
