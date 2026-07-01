@@ -71,7 +71,10 @@ Live MCP triage (Grafana + GitHub): see `docs/mcp-triage.md`.
 CAUSA_TRIAGE=mcp task demo   # after merging the regression PR
 ```
 
-URLs: Prometheus http://localhost:9090/alerts · Alertmanager
-http://localhost:9093 · Grafana http://localhost:3000/d/payments/payments ·
-Jaeger http://localhost:16686 · Console http://localhost:8501
+URLs: 
+· Prometheus http://localhost:9090/alerts 
+· Alertmanager http://localhost:9093 
+· Grafana http://localhost:3000/d/payments/payments 
+· Jaeger http://localhost:16686 
+· Console http://localhost:8501
 
