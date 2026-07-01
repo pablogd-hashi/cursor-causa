@@ -1,13 +1,9 @@
-# Causa — local-first stack. Phase 0 defines the topology; the observability
-# config files (otel-collector, prometheus, grafana, loki) and the application
-# images (demo-app, causa-api, causa-console) are populated in Phase 1+.
-# Therefore `docker compose up` is not expected to fully start yet;
-# `docker compose config` (lint) is the Phase 0 check.
+# Causa — local-first stack with optional Consul Connect mesh (mesh/).
+# Default `task substrate:up` starts observability + demo-app only.
+# `task mesh:up` adds Consul, fake-service topology, gateways, and loadgen.
 #
-# One user-defined bridge network keeps the demo simple (the reference used a
-# Consul Connect mesh; that is deliberately left behind — see architecture.md).
-# The two MCP servers and the Node SDK runner are NOT services here: they are
-# subprocesses spawned by causa-api (stdio MCP + JSONL streaming respectively).
+# One user-defined bridge network. MCP servers and the Node SDK runner are NOT
+# services here — they are subprocesses spawned by causa-api on the host.
 
 name: causa
 
@@ -19,17 +15,30 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  envoy-logs:
+
+x-sidecar: &sidecar
+  image: hashicorp/consul:1.22.3
+  restart: unless-stopped
+  environment:
+    CONSUL_HTTP_ADDR: http://consul:8500
+  depends_on:
+    consul:
+      condition: service_healthy
 
 services:
-  # --- Observability backends (config lifted from smolagents-observability) ---
+  # --- Observability backends -------------------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.117.0
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otel/config.yaml:ro
+      - envoy-logs:/var/log/envoy
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+      - "9411:9411"   # Zipkin (mesh fake-services + Envoy)
+      - "8889:8889"   # Service graph metrics
     networks: [causa]
 
   prometheus:
@@ -54,9 +63,6 @@ services:
     ports:
       - "9093:9093"
     networks: [causa]
-    # The webhook receiver in alertmanager.yml posts firing alerts to
-    # http://causa-api:8000/webhook/alert with the shared secret. This is how a
-    # *real* alert reaches Causa.
 
   loki:
     image: grafana/loki:3.3.0
@@ -73,7 +79,7 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"  # UI (deeplink target)
+      - "16686:16686"
     networks: [causa]
 
   grafana:
@@ -86,31 +92,233 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"   # deeplink target
+      - "3000:3000"
     depends_on: [prometheus, loki, jaeger]
     networks: [causa]
 
-  # --- The breakable service under investigation (Phase 1) --------------------
+  # --- Consul (mesh only; started by task mesh:up) ----------------------------
+  consul:
+    image: hashicorp/consul:1.22.3
+    profiles: [mesh]
+    volumes:
+      - ./mesh/consul/consul.hcl:/consul/config/consul.hcl:ro
+    command: ["agent", "-config-file=/consul/config/consul.hcl"]
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    networks: [causa]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8500/v1/status/leader"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  consul-init:
+    image: hashicorp/consul:1.22.3
+    profiles: [mesh]
+    volumes:
+      - ./mesh/consul:/consul/config:ro
+      - ./mesh/scripts/consul-init.sh:/consul-init.sh:ro
+    entrypoint: ["/bin/sh", "/consul-init.sh"]
+    depends_on:
+      consul:
+        condition: service_healthy
+    networks: [causa]
+
+  # --- fake-service mesh (profile: mesh) --------------------------------------
+  rates:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: rates
+      MESSAGE: Rates response (external service)
+      LISTEN_ADDR: 0.0.0.0:9090
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    networks: [causa]
+    depends_on: [otel-collector]
+
+  currency:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: currency
+      MESSAGE: Currency response
+      LISTEN_ADDR: 0.0.0.0:9090
+      UPSTREAM_URIS: http://terminating-gateway:9190
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    networks: [causa]
+    depends_on: [consul, otel-collector, terminating-gateway]
+
+  currency-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:currency"
+    command: ["consul", "connect", "envoy", "-sidecar-for", "currency-1", "-admin-bind", "0.0.0.0:20200"]
+
+  cache:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: cache
+      MESSAGE: Cache response
+      LISTEN_ADDR: 0.0.0.0:9090
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    networks: [causa]
+    depends_on: [consul, otel-collector]
+
+  cache-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:cache"
+    command: ["consul", "connect", "envoy", "-sidecar-for", "cache-1", "-admin-bind", "0.0.0.0:20200"]
+
+  api:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: api
+      MESSAGE: API response
+      LISTEN_ADDR: 0.0.0.0:9090
+      UPSTREAM_URIS: http://payments:8080,http://cache:9090
+      UPSTREAM_WORKERS: "2"
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    networks: [causa]
+    depends_on: [consul, otel-collector, demo-app, cache]
+
+  api-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:api"
+    command: ["consul", "connect", "envoy", "-sidecar-for", "api-1", "-admin-bind", "0.0.0.0:20200"]
+
+  web:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: web
+      MESSAGE: Hello from web
+      LISTEN_ADDR: 0.0.0.0:9090
+      UPSTREAM_URIS: http://api:9090
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    networks: [causa]
+    depends_on: [consul, otel-collector, api]
+
+  web-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:web"
+    command: ["consul", "connect", "envoy", "-sidecar-for", "web-1", "-admin-bind", "0.0.0.0:20200"]
+
+  # --- The breakable payments service (substrate + mesh) ----------------------
   demo-app:
     build: ./demo-app
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: "payments"
-      # The breakable knob. Healthy default 50; break.sh recreates with 10.
       POOL_MAX_SIZE: "${POOL_MAX_SIZE:-50}"
       DB_WRITE_S: "${DB_WRITE_S:-0.03}"
       EXT_CALL_S: "${EXT_CALL_S:-0.07}"
     ports:
       - "8080:8080"
     depends_on: [otel-collector]
+    networks:
+      causa:
+        aliases:
+          - payments
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  payments-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:demo-app"
+    depends_on:
+      consul:
+        condition: service_healthy
+      demo-app:
+        condition: service_healthy
+    command: ["consul", "connect", "envoy", "-sidecar-for", "payments-1", "-admin-bind", "0.0.0.0:20200"]
+
+  # --- Envoy gateways (profile: mesh) -----------------------------------------
+  envoy:
+    image: envoyproxy/envoy:v1.32.2
+    profiles: [mesh]
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "mkdir -p /var/log/envoy && exec envoy -c /etc/envoy/envoy-access-log.json --service-cluster web --service-node web-proxy -l info"
+    volumes:
+      - ./mesh/envoy/envoy-access-log.json:/etc/envoy/envoy-access-log.json:ro
+      - envoy-logs:/var/log/envoy
+    ports:
+      - "20200:20200"
+      - "21000:21000"
     networks: [causa]
+    depends_on: [web]
+
+  api-gateway:
+    image: envoyproxy/envoy:v1.32.2
+    profiles: [mesh]
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "mkdir -p /var/log/envoy && exec envoy -c /etc/envoy/envoy-api-gateway.json --service-cluster api-gateway --service-node api-gateway -l info"
+    volumes:
+      - ./mesh/envoy/envoy-api-gateway.json:/etc/envoy/envoy-api-gateway.json:ro
+      - envoy-logs:/var/log/envoy
+    ports:
+      - "20201:20201"
+      - "21001:21001"
+    networks: [causa]
+    depends_on: [web, otel-collector]
+
+  terminating-gateway:
+    image: envoyproxy/envoy:v1.32.2
+    profiles: [mesh]
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "exec envoy -c /etc/envoy/envoy-terminating-gateway.json --service-cluster terminating-gateway --service-node terminating-gateway -l info"
+    volumes:
+      - ./mesh/envoy/envoy-terminating-gateway.json:/etc/envoy/envoy-terminating-gateway.json:ro
+    ports:
+      - "20202:20202"
+      - "9190:9190"
+    networks: [causa]
+    depends_on: [rates]
+
+  loadgen:
+    image: curlimages/curl:8.7.1
+    profiles: [mesh]
+    depends_on: [envoy, api-gateway, web]
+    networks: [causa]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Waiting for mesh services..."
+        sleep 25
+        while true; do
+          curl -sf http://envoy:21000/ > /dev/null || true
+          curl -sf http://envoy:21000/ > /dev/null || true
+          curl -sf http://api-gateway:21001/ > /dev/null || true
+          curl -sf http://web:9090/ > /dev/null || true
+          sleep 2
+        done
 
   # --- Causa itself (Phase 4/5) ----------------------------------------------
   causa-api:
     build:
       context: .
-      dockerfile: Dockerfile.api   # bundles Python + Node 20 + @cursor/sdk +
-                                   # the mcp-grafana and github-mcp-server binaries
+      dockerfile: Dockerfile.api
     environment:
       CURSOR_API_KEY: "${CURSOR_API_KEY:-}"
       CURSOR_TARGET_REPO: "${CURSOR_TARGET_REPO:-https://github.com/pablogd-hashi/cursor-causa}"
@@ -129,7 +337,7 @@ services:
   causa-console:
     build:
       context: .
-      dockerfile: Dockerfile.console   # Streamlit three-pane console
+      dockerfile: Dockerfile.console
     environment:
       CAUSA_API_URL: "http://causa-api:8000"
     ports:

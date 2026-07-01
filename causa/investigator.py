@@ -84,6 +84,8 @@ class MockInvestigator(Investigator):
         rca.generated_by = GeneratedBy.mock
         rca.investigation_id = brief.investigation_id
         rca.service = brief.service
+        rca.blast_radius.if_rolled_back = brief.blast_radius_hint
+        rca.blast_radius.graph_source = brief.blast_radius_graph_source
         yield InvestigationEvent(type="rca", rca=rca)
 
 

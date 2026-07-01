@@ -8,15 +8,11 @@ on the record so the console can show it (degrade, never crash).
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .brief import AlertContext, RepoTarget, assemble_brief
 from .investigator import get_investigator
 from .sources import get_sources
 from .store import STORE, InvestigationStatus
-from .topology import DeclaredTopologySource
-
-_ROOT = Path(__file__).resolve().parent.parent
+from .topology import get_topology
 
 
 def run_investigation(
@@ -27,7 +23,7 @@ def run_investigation(
 ) -> None:
     try:
         grafana, github = get_sources()
-        topology = DeclaredTopologySource(_ROOT / "topology.yaml")
+        topology = get_topology()
 
         STORE.update(investigation_id, status=InvestigationStatus.triaging)
         brief = assemble_brief(

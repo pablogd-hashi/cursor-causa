@@ -47,16 +47,25 @@ _req_duration = _meter.create_histogram(
 )
 
 
-@app.post("/charge")
-async def charge(amount: float = 1.0):
+async def _pooled_work(amount: float = 1.0) -> dict:
+    """Shared handler body: acquire a pool slot and hold it across simulated work."""
     start = time.perf_counter()
     async with pool.acquire():
-        # Hold the connection across the simulated downstream work. A small pool
-        # serialises this, which is the whole failure mode.
         await asyncio.sleep(DB_WRITE_S + EXT_CALL_S)
     duration = time.perf_counter() - start
     _req_duration.record(duration)
     return {"status": "ok", "amount": amount, "duration_s": round(duration, 4)}
+
+
+@app.get("/")
+async def root():
+    # Mesh traffic (web → api → payments) hits / like fake-service; same pool path.
+    return await _pooled_work()
+
+
+@app.post("/charge")
+async def charge(amount: float = 1.0):
+    return await _pooled_work(amount)
 
 
 @app.get("/healthz")
