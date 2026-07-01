@@ -13,8 +13,13 @@ POOL="${1:-10}"
 DURATION="${2:-180}"
 CONC="${3:-150}"
 
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  DOCKER="sudo docker"
+fi
+
 echo "==> Recreating demo-app with POOL_MAX_SIZE=${POOL}"
-POOL_MAX_SIZE="${POOL}" docker compose up -d --force-recreate demo-app
+POOL_MAX_SIZE="${POOL}" ${DOCKER} compose up -d --force-recreate demo-app
 
 echo "==> Waiting for demo-app to come up"
 for _ in $(seq 1 30); do

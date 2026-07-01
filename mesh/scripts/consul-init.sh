@@ -3,6 +3,7 @@
 set -eu
 
 CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR:-http://consul:8500}"
+export CONSUL_HTTP_ADDR
 CONFIG_DIR="${CONFIG_DIR:-/consul/config}"
 
 echo "waiting for Consul at ${CONSUL_HTTP_ADDR}..."
@@ -14,7 +15,9 @@ for _ in $(seq 1 60); do
 done
 
 consul config write "${CONFIG_DIR}/proxy-defaults.hcl"
-consul config write "${CONFIG_DIR}/service-defaults.hcl"
 consul config write "${CONFIG_DIR}/intentions-allow.hcl"
+for f in "${CONFIG_DIR}"/service-defaults/*.hcl; do
+  consul config write "$f"
+done
 
 echo "Consul config entries applied."

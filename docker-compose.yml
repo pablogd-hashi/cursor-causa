@@ -18,13 +18,20 @@ volumes:
   envoy-logs:
 
 x-sidecar: &sidecar
-  image: hashicorp/consul:1.22.3
+  build:
+    context: ./mesh
+    dockerfile: Dockerfile.consul-envoy
+  image: causa-consul-envoy:1.22.3
   restart: unless-stopped
-  environment:
-    CONSUL_HTTP_ADDR: http://consul:8500
+  volumes:
+    - ./mesh/scripts/sidecar-entrypoint.sh:/sidecar-entrypoint.sh:ro
+    - ./mesh/consul/services:/consul/config/services:ro
+  entrypoint: ["/bin/sh", "/sidecar-entrypoint.sh"]
   depends_on:
     consul:
       condition: service_healthy
+    consul-init:
+      condition: service_completed_successfully
 
 services:
   # --- Observability backends -------------------------------------------------
@@ -124,6 +131,7 @@ services:
       consul:
         condition: service_healthy
     networks: [causa]
+    restart: "no"
 
   # --- fake-service mesh (profile: mesh) --------------------------------------
   rates:
@@ -155,7 +163,8 @@ services:
     <<: *sidecar
     profiles: [mesh]
     network_mode: "service:currency"
-    command: ["consul", "connect", "envoy", "-sidecar-for", "currency-1", "-admin-bind", "0.0.0.0:20200"]
+    environment:
+      SERVICE_ID: currency-1
 
   cache:
     image: nicholasjackson/fake-service:v0.26.2
@@ -173,7 +182,8 @@ services:
     <<: *sidecar
     profiles: [mesh]
     network_mode: "service:cache"
-    command: ["consul", "connect", "envoy", "-sidecar-for", "cache-1", "-admin-bind", "0.0.0.0:20200"]
+    environment:
+      SERVICE_ID: cache-1
 
   api:
     image: nicholasjackson/fake-service:v0.26.2
@@ -193,7 +203,8 @@ services:
     <<: *sidecar
     profiles: [mesh]
     network_mode: "service:api"
-    command: ["consul", "connect", "envoy", "-sidecar-for", "api-1", "-admin-bind", "0.0.0.0:20200"]
+    environment:
+      SERVICE_ID: api-1
 
   web:
     image: nicholasjackson/fake-service:v0.26.2
@@ -212,7 +223,8 @@ services:
     <<: *sidecar
     profiles: [mesh]
     network_mode: "service:web"
-    command: ["consul", "connect", "envoy", "-sidecar-for", "web-1", "-admin-bind", "0.0.0.0:20200"]
+    environment:
+      SERVICE_ID: web-1
 
   # --- The breakable payments service (substrate + mesh) ----------------------
   demo-app:
@@ -245,7 +257,8 @@ services:
         condition: service_healthy
       demo-app:
         condition: service_healthy
-    command: ["consul", "connect", "envoy", "-sidecar-for", "payments-1", "-admin-bind", "0.0.0.0:20200"]
+    environment:
+      SERVICE_ID: payments-1
 
   # --- Envoy gateways (profile: mesh) -----------------------------------------
   envoy:
