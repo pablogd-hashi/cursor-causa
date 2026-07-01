@@ -1,0 +1,63 @@
+flowchart TB
+  root["Causa Repository"]
+
+  subgraph contract ["Trust Boundary"]
+    contractPy["causa/contract.py"]
+    schemaJson["schema/rca.schema.json"]
+    fixtureJson["fixtures/rca_payments.json"]
+  end
+
+  subgraph orchestration ["Orchestration"]
+    apiPy["causa/api.py"]
+    briefPy["causa/brief.py"]
+    orchestratorPy["causa/orchestrator.py"]
+  end
+
+  subgraph ui ["Console"]
+    consoleApp["console/app.py"]
+  end
+
+  subgraph agent ["Live Investigation"]
+    sdkRunnerDir["sdk-runner/"]
+    investigatorPy["causa/investigator.py"]
+  end
+
+  subgraph demo ["Demo Service"]
+    demoAppDir["demo-app/"]
+    poolPy["payments/pool.py"]
+  end
+
+  subgraph obs ["Observability Config"]
+    observabilityDir["observability/"]
+    composeYml["docker-compose.yml"]
+  end
+
+  subgraph config ["Configuration"]
+    mcpJson[".mcp.json"]
+    envExample[".env.example"]
+    topologyYaml["topology.yaml"]
+  end
+
+  subgraph docs ["Documentation"]
+    archMd["architecture.md"]
+    mcpTriageMd["docs/mcp-triage.md"]
+    demoStoryMd["docs/demo-storyline.md"]
+  end
+
+  root --> contract
+  root --> orchestration
+  root --> ui
+  root --> agent
+  root --> demo
+  root --> obs
+  root --> config
+  root --> docs
+
+  contractPy --> schemaJson
+  fixtureJson --> investigatorPy
+  apiPy --> orchestratorPy
+  orchestratorPy --> briefPy
+  investigatorPy --> sdkRunnerDir
+  demoAppDir --> poolPy
+  observabilityDir --> composeYml
+  topologyYaml --> orchestratorPy
