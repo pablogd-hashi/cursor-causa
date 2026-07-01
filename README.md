@@ -75,7 +75,3 @@ URLs: Prometheus http://localhost:9090/alerts · Alertmanager
 http://localhost:9093 · Grafana http://localhost:3000/d/payments/payments ·
 Jaeger http://localhost:16686 · Console http://localhost:8501
 
-## Conventions
-
-British spelling, no marketing language, clarity over cleverness. Causa is
-read-only against every external system and never commits or pushes.
