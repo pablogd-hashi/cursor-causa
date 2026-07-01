@@ -8,7 +8,7 @@ uvicorn[standard]==0.34.0
 
 # Console (Phase 5)
 streamlit==1.41.1
-requests==2.32.3
+requests==2.33.0
 
 # MCP: used for both CAUSA_TRIAGE=mcp triage and the Causa MCP server
 # (causa/mcp_server.py) that exposes investigation tools to Cursor.
