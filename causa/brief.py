@@ -54,6 +54,7 @@ class InvestigationBrief(BaseModel):
     metric_signatures: list[MetricSignature]
     candidate_changes: list[CandidateChange]
     blast_radius_hint: list[str]  # from topology; the agent confirms/uses it
+    blast_radius_graph_source: str = "declared:topology.yaml"
     repo: RepoTarget
     degraded: list[str] = []  # triage sources that were unavailable
 
@@ -134,6 +135,7 @@ def assemble_brief(
         metric_signatures=signatures,
         candidate_changes=changes,
         blast_radius_hint=topology.dependents(service),
+        blast_radius_graph_source=topology.graph_source,
         repo=repo,
         degraded=degraded,
     )

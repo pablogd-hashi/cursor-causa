@@ -1,8 +1,5 @@
-# OpenTelemetry Collector for Causa. Adapted from the reference repo's pipeline.
-# Three pipelines fan out to Jaeger (traces), Prometheus (metrics) and Loki
-# (logs). The smolagents-specific prompt redaction is removed; the tail-sampling
-# slow threshold is lowered to 1s so the payments latency incident's slow charge
-# traces are always retained (normal p99 ~0.18s stays in the 5% baseline).
+# OpenTelemetry Collector for Causa. Unified OTLP (payments) + Zipkin (mesh)
+# pipelines fan out to Jaeger, Prometheus (remote write + service graph), and Loki.
 
 receivers:
   otlp:
@@ -11,6 +8,9 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
+  zipkin:
+    endpoint: 0.0.0.0:9411
 
 processors:
   memory_limiter:
@@ -47,8 +47,42 @@ processors:
         probabilistic:
           sampling_percentage: 5
 
+  # fake-service Zipkin spans omit kind=CLIENT; servicegraph ignores them unless
+  # we fix the kind and peer.service for call_upstream spans.
+  transform/fix_client_spans:
+    trace_statements:
+      - context: span
+        statements:
+          - set(kind, SPAN_KIND_CLIENT) where name == "call_upstream"
+          - set(attributes["peer.service"], attributes["http.url"]) where name == "call_upstream" and attributes["http.url"] != nil
+          - replace_pattern(attributes["peer.service"], "^https?://([^:/]+).*$$", "$$1") where attributes["peer.service"] != nil and name == "call_upstream"
+
+  filter/client_only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'kind != SPAN_KIND_CLIENT'
+
+  attributes/mesh:
+    actions:
+      - key: mesh
+        value: consul
+        action: insert
+      - key: datacenter
+        value: dc1
+        action: insert
+
+connectors:
+  servicegraph:
+    latency_histogram_buckets: [1ms, 2ms, 6ms, 10ms, 100ms, 250ms, 500ms, 1000ms]
+    dimensions: []
+    store:
+      ttl: 10s
+      max_items: 1000
+    cache_loop: 1s
+    virtual_node_peer_attributes: ["peer.service"]
+
 exporters:
-  # Jaeger v2 speaks OTLP natively.
   otlp/jaeger:
     endpoint: jaeger:4317
     tls:
@@ -58,8 +92,6 @@ exporters:
     endpoint: http://prometheus:9090/api/v1/write
     tls:
       insecure: true
-    # Promote resource attributes (service.name -> service_name, etc.) to labels
-    # so the payments metrics carry a service label the dashboards filter on.
     resource_to_telemetry_conversion:
       enabled: true
 
@@ -67,6 +99,11 @@ exporters:
     endpoint: http://loki:3100/otlp
     tls:
       insecure: true
+
+  # Service graph metrics: traces_service_graph_request_total on :8889
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: ""
 
 extensions:
   health_check:
@@ -77,22 +114,34 @@ service:
   telemetry:
     logs:
       level: info
-    # Expose the collector's own internal metrics on all interfaces (default is
-    # localhost:8888, unreachable from Prometheus on the Docker network) so the
-    # `otel-collector` scrape target in prometheus.yml comes up. The `address`
-    # key is valid for the pinned contrib v0.117.0; later versions replace it
-    # with service.telemetry.metrics.readers (a Prometheus pull reader).
     metrics:
       address: 0.0.0.0:8888
   pipelines:
-    traces:
+    traces/otlp:
       receivers: [otlp]
       processors: [memory_limiter, resource, tail_sampling, batch]
+      exporters: [otlp/jaeger, servicegraph]
+
+    traces/zipkin:
+      receivers: [zipkin]
+      processors: [memory_limiter, transform/fix_client_spans, attributes/mesh, batch]
       exporters: [otlp/jaeger]
+
+    traces/zipkin_graph:
+      receivers: [zipkin]
+      processors: [memory_limiter, transform/fix_client_spans, filter/client_only, batch]
+      exporters: [servicegraph]
+
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
+
+    metrics/servicegraph:
+      receivers: [servicegraph]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]

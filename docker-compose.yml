@@ -1,13 +1,9 @@
-# Causa — local-first stack. Phase 0 defines the topology; the observability
-# config files (otel-collector, prometheus, grafana, loki) and the application
-# images (demo-app, causa-api, causa-console) are populated in Phase 1+.
-# Therefore `docker compose up` is not expected to fully start yet;
-# `docker compose config` (lint) is the Phase 0 check.
+# Causa — local-first stack with optional Consul Connect mesh (mesh/).
+# Default `task substrate:up` starts observability + demo-app only.
+# `task mesh:up` adds a minimal mesh: web → api → payments + loadgen.
 #
-# One user-defined bridge network keeps the demo simple (the reference used a
-# Consul Connect mesh; that is deliberately left behind — see architecture.md).
-# The two MCP servers and the Node SDK runner are NOT services here: they are
-# subprocesses spawned by causa-api (stdio MCP + JSONL streaming respectively).
+# One user-defined bridge network. MCP servers and the Node SDK runner are NOT
+# services here — they are subprocesses spawned by causa-api on the host.
 
 name: causa
 
@@ -19,17 +15,36 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  consul-data:
+
+x-sidecar: &sidecar
+  build:
+    context: ./mesh
+    dockerfile: Dockerfile.consul-envoy
+  image: causa-consul-envoy:1.22.3
+  restart: unless-stopped
+  volumes:
+    - ./mesh/scripts/sidecar-entrypoint.sh:/sidecar-entrypoint.sh:ro
+    - ./mesh/consul/services:/consul/config/services:ro
+  entrypoint: ["/bin/sh", "/sidecar-entrypoint.sh"]
+  depends_on:
+    consul:
+      condition: service_healthy
+    consul-init:
+      condition: service_completed_successfully
 
 services:
-  # --- Observability backends (config lifted from smolagents-observability) ---
+  # --- Observability backends -------------------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.117.0
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otel/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "4317:4317"
+      - "4318:4318"
+      - "9411:9411"
+      - "8889:8889"
     networks: [causa]
 
   prometheus:
@@ -54,9 +69,6 @@ services:
     ports:
       - "9093:9093"
     networks: [causa]
-    # The webhook receiver in alertmanager.yml posts firing alerts to
-    # http://causa-api:8000/webhook/alert with the shared secret. This is how a
-    # *real* alert reaches Causa.
 
   loki:
     image: grafana/loki:3.3.0
@@ -73,7 +85,7 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"  # UI (deeplink target)
+      - "16686:16686"
     networks: [causa]
 
   grafana:
@@ -86,31 +98,144 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"   # deeplink target
+      - "3000:3000"
     depends_on: [prometheus, loki, jaeger]
     networks: [causa]
 
-  # --- The breakable service under investigation (Phase 1) --------------------
+  # --- Consul (mesh profile) --------------------------------------------------
+  consul:
+    image: hashicorp/consul:1.22.3
+    profiles: [mesh]
+    volumes:
+      - ./mesh/consul/consul.hcl:/consul/config/consul.hcl:ro
+      - consul-data:/consul/data
+    command: ["agent", "-config-file=/consul/config/consul.hcl"]
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    networks: [causa]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8500/v1/status/leader"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  consul-init:
+    image: hashicorp/consul:1.22.3
+    profiles: [mesh]
+    volumes:
+      - ./mesh/consul:/consul/config:ro
+      - ./mesh/scripts/consul-init.sh:/consul-init.sh:ro
+    entrypoint: ["/bin/sh", "/consul-init.sh"]
+    depends_on:
+      consul:
+        condition: service_healthy
+    networks: [causa]
+    restart: "no"
+
+  # --- Minimal mesh: web → api → payments (profile: mesh) ---------------------
+  api:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: api
+      MESSAGE: API response
+      LISTEN_ADDR: 0.0.0.0:9090
+      UPSTREAM_URIS: http://payments:8080
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    ports:
+      - "9091:9090"
+    networks: [causa]
+    depends_on: [consul, otel-collector, demo-app]
+
+  api-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:api"
+    environment:
+      SERVICE_ID: api-1
+
+  web:
+    image: nicholasjackson/fake-service:v0.26.2
+    profiles: [mesh]
+    environment:
+      NAME: web
+      MESSAGE: Hello from web
+      LISTEN_ADDR: 0.0.0.0:9090
+      UPSTREAM_URIS: http://api:9090
+      TRACING_ZIPKIN: http://otel-collector:9411
+      LOG_FORMAT: json
+    ports:
+      - "9080:9090"
+    networks: [causa]
+    depends_on: [consul, otel-collector, api]
+
+  web-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:web"
+    environment:
+      SERVICE_ID: web-1
+
+  loadgen:
+    image: curlimages/curl:8.7.1
+    profiles: [mesh]
+    depends_on: [web]
+    networks: [causa]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "loadgen: steady traffic web → api → payments"
+        sleep 15
+        while true; do
+          curl -sf http://web:9090/ > /dev/null || true
+          curl -sf http://web:9090/ > /dev/null || true
+          sleep 2
+        done
+
+  # --- The breakable payments service (substrate + mesh) ----------------------
   demo-app:
     build: ./demo-app
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_SERVICE_NAME: "payments"
-      # The breakable knob. Healthy default 50; break.sh recreates with 10.
       POOL_MAX_SIZE: "${POOL_MAX_SIZE:-50}"
       DB_WRITE_S: "${DB_WRITE_S:-0.03}"
       EXT_CALL_S: "${EXT_CALL_S:-0.07}"
     ports:
       - "8080:8080"
     depends_on: [otel-collector]
-    networks: [causa]
+    networks:
+      causa:
+        aliases:
+          - payments
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
-  # --- Causa itself (Phase 4/5) ----------------------------------------------
+  payments-sidecar:
+    <<: *sidecar
+    profiles: [mesh]
+    network_mode: "service:demo-app"
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+      demo-app:
+        condition: service_healthy
+    environment:
+      SERVICE_ID: payments-1
+
+  # --- Causa itself (optional Docker services; host run via run-local.sh) -----
   causa-api:
     build:
       context: .
-      dockerfile: Dockerfile.api   # bundles Python + Node 20 + @cursor/sdk +
-                                   # the mcp-grafana and github-mcp-server binaries
+      dockerfile: Dockerfile.api
     environment:
       CURSOR_API_KEY: "${CURSOR_API_KEY:-}"
       CURSOR_TARGET_REPO: "${CURSOR_TARGET_REPO:-https://github.com/pablogd-hashi/cursor-causa}"
@@ -129,7 +254,7 @@ services:
   causa-console:
     build:
       context: .
-      dockerfile: Dockerfile.console   # Streamlit three-pane console
+      dockerfile: Dockerfile.console
     environment:
       CAUSA_API_URL: "http://causa-api:8000"
     ports:

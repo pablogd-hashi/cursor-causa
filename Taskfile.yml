@@ -4,6 +4,7 @@ vars:
   PY: "{{.TASKFILE_DIR}}/.venv/bin/python"
   PIP: "{{.TASKFILE_DIR}}/.venv/bin/pip"
   SUBSTRATE: otel-collector prometheus alertmanager loki jaeger grafana demo-app
+  MESH_SERVICES: consul consul-init api api-sidecar web web-sidecar payments-sidecar loadgen
 
 tasks:
   default:
@@ -53,6 +54,31 @@ tasks:
     desc: Start observability stack and demo-app
     cmds:
       - docker compose up -d --build {{.SUBSTRATE}}
+
+  mesh:up:
+    desc: Start minimal Consul mesh (web→api→payments) + observability
+    cmds:
+      - docker compose --profile mesh stop {{.MESH_SERVICES}} 2>/dev/null || true
+      - docker volume rm causa_consul-data 2>/dev/null || true
+      - docker compose --profile mesh up -d --build {{.SUBSTRATE}} {{.MESH_SERVICES}}
+      - echo "Consul  http://localhost:8500"
+      - echo "Mesh    http://localhost:9080/  (web → api → payments)"
+      - echo "Grafana http://localhost:3000/d/service-to-service"
+
+  mesh:demo:
+    desc: Interactive walkthrough — mesh, topology, triage
+    deps: [setup]
+    preconditions:
+      - sh: test -f "{{.TASKFILE_DIR}}/mesh-demo.sh"
+        msg: "mesh-demo.sh missing — git pull origin cursor/mesh-native-causa-492c"
+    cmds:
+      - ./mesh-demo.sh
+
+  mesh:down:
+    desc: Stop mesh profile services (keeps substrate running)
+    cmds:
+      - docker compose --profile mesh stop {{.MESH_SERVICES}}
+      - docker compose --profile mesh rm -f {{.MESH_SERVICES}}
 
   substrate:down:
     desc: Stop all Docker services
