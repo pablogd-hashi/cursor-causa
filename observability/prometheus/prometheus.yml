@@ -1,5 +1,5 @@
 # Prometheus for Causa. Metrics arrive from the OTel Collector via remote write
-# and from mesh scrape targets (Consul, Envoy, service graph).
+# and from mesh scrape targets (Consul, service graph).
 
 global:
   scrape_interval: 15s
@@ -32,14 +32,6 @@ scrape_configs:
       - target_label: instance
         replacement: consul
 
-  - job_name: envoy
-    metrics_path: /stats/prometheus
-    static_configs:
-      - targets: ['envoy:20200']
-    relabel_configs:
-      - target_label: instance
-        replacement: envoy
-
   - job_name: servicegraph
     metrics_path: /metrics
     static_configs:
@@ -47,19 +39,3 @@ scrape_configs:
     relabel_configs:
       - target_label: instance
         replacement: otel-collector-servicegraph
-
-  - job_name: api-gateway
-    metrics_path: /stats/prometheus
-    static_configs:
-      - targets: ['api-gateway:20201']
-    relabel_configs:
-      - target_label: instance
-        replacement: api-gateway
-
-  - job_name: terminating-gateway
-    metrics_path: /stats/prometheus
-    static_configs:
-      - targets: ['terminating-gateway:20202']
-    relabel_configs:
-      - target_label: instance
-        replacement: terminating-gateway

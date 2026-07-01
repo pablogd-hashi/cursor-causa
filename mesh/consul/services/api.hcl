@@ -10,7 +10,6 @@ service {
         mode = "transparent"
         upstreams = [
           { destination_name = "payments" local_bind_port = 19080 },
-          { destination_name = "cache" local_bind_port = 19091 },
         ]
       }
     }

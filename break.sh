@@ -29,11 +29,14 @@ done
 curl -fsS localhost:8080/healthz && echo
 
 MESH_ENTRY=""
-if curl -fsS localhost:21000/ >/dev/null 2>&1; then
-  MESH_ENTRY="http://localhost:21000/"
+if curl -fsS localhost:9080/health >/dev/null 2>&1; then
+  MESH_ENTRY="http://localhost:9080/"
   echo "==> Mesh entry detected — driving load through ${MESH_ENTRY}"
+elif curl -fsS localhost:21000/ >/dev/null 2>&1; then
+  MESH_ENTRY="http://localhost:21000/"
+  echo "==> Legacy mesh entry on :21000 — driving load through ${MESH_ENTRY}"
 else
-  echo "==> No mesh entry on :21000 — driving load directly to :8080/charge"
+  echo "==> No mesh entry — driving load directly to :8080/charge"
 fi
 
 echo "==> Driving ${CONC} concurrent requests for ${DURATION}s"

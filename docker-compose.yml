@@ -1,6 +1,6 @@
 # Causa — local-first stack with optional Consul Connect mesh (mesh/).
 # Default `task substrate:up` starts observability + demo-app only.
-# `task mesh:up` adds Consul, fake-service topology, gateways, and loadgen.
+# `task mesh:up` adds a minimal mesh: web → api → payments + loadgen.
 #
 # One user-defined bridge network. MCP servers and the Node SDK runner are NOT
 # services here — they are subprocesses spawned by causa-api on the host.
@@ -15,7 +15,7 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
-  envoy-logs:
+  consul-data:
 
 x-sidecar: &sidecar
   build:
@@ -40,12 +40,11 @@ services:
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otel/config.yaml:ro
-      - envoy-logs:/var/log/envoy
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "9411:9411"   # Zipkin (mesh fake-services + Envoy)
-      - "8889:8889"   # Service graph metrics
+      - "4317:4317"
+      - "4318:4318"
+      - "9411:9411"
+      - "8889:8889"
     networks: [causa]
 
   prometheus:
@@ -103,12 +102,13 @@ services:
     depends_on: [prometheus, loki, jaeger]
     networks: [causa]
 
-  # --- Consul (mesh only; started by task mesh:up) ----------------------------
+  # --- Consul (mesh profile) --------------------------------------------------
   consul:
     image: hashicorp/consul:1.22.3
     profiles: [mesh]
     volumes:
       - ./mesh/consul/consul.hcl:/consul/config/consul.hcl:ro
+      - consul-data:/consul/data
     command: ["agent", "-config-file=/consul/config/consul.hcl"]
     ports:
       - "8500:8500"
@@ -133,58 +133,7 @@ services:
     networks: [causa]
     restart: "no"
 
-  # --- fake-service mesh (profile: mesh) --------------------------------------
-  rates:
-    image: nicholasjackson/fake-service:v0.26.2
-    profiles: [mesh]
-    environment:
-      NAME: rates
-      MESSAGE: Rates response (external service)
-      LISTEN_ADDR: 0.0.0.0:9090
-      TRACING_ZIPKIN: http://otel-collector:9411
-      LOG_FORMAT: json
-    networks: [causa]
-    depends_on: [otel-collector]
-
-  currency:
-    image: nicholasjackson/fake-service:v0.26.2
-    profiles: [mesh]
-    environment:
-      NAME: currency
-      MESSAGE: Currency response
-      LISTEN_ADDR: 0.0.0.0:9090
-      UPSTREAM_URIS: http://terminating-gateway:9190
-      TRACING_ZIPKIN: http://otel-collector:9411
-      LOG_FORMAT: json
-    networks: [causa]
-    depends_on: [consul, otel-collector, terminating-gateway]
-
-  currency-sidecar:
-    <<: *sidecar
-    profiles: [mesh]
-    network_mode: "service:currency"
-    environment:
-      SERVICE_ID: currency-1
-
-  cache:
-    image: nicholasjackson/fake-service:v0.26.2
-    profiles: [mesh]
-    environment:
-      NAME: cache
-      MESSAGE: Cache response
-      LISTEN_ADDR: 0.0.0.0:9090
-      TRACING_ZIPKIN: http://otel-collector:9411
-      LOG_FORMAT: json
-    networks: [causa]
-    depends_on: [consul, otel-collector]
-
-  cache-sidecar:
-    <<: *sidecar
-    profiles: [mesh]
-    network_mode: "service:cache"
-    environment:
-      SERVICE_ID: cache-1
-
+  # --- Minimal mesh: web → api → payments (profile: mesh) ---------------------
   api:
     image: nicholasjackson/fake-service:v0.26.2
     profiles: [mesh]
@@ -192,12 +141,13 @@ services:
       NAME: api
       MESSAGE: API response
       LISTEN_ADDR: 0.0.0.0:9090
-      UPSTREAM_URIS: http://payments:8080,http://cache:9090
-      UPSTREAM_WORKERS: "2"
+      UPSTREAM_URIS: http://payments:8080
       TRACING_ZIPKIN: http://otel-collector:9411
       LOG_FORMAT: json
+    ports:
+      - "9091:9090"
     networks: [causa]
-    depends_on: [consul, otel-collector, demo-app, cache]
+    depends_on: [consul, otel-collector, demo-app]
 
   api-sidecar:
     <<: *sidecar
@@ -216,6 +166,8 @@ services:
       UPSTREAM_URIS: http://api:9090
       TRACING_ZIPKIN: http://otel-collector:9411
       LOG_FORMAT: json
+    ports:
+      - "9080:9090"
     networks: [causa]
     depends_on: [consul, otel-collector, api]
 
@@ -225,6 +177,23 @@ services:
     network_mode: "service:web"
     environment:
       SERVICE_ID: web-1
+
+  loadgen:
+    image: curlimages/curl:8.7.1
+    profiles: [mesh]
+    depends_on: [web]
+    networks: [causa]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "loadgen: steady traffic web → api → payments"
+        sleep 15
+        while true; do
+          curl -sf http://web:9090/ > /dev/null || true
+          curl -sf http://web:9090/ > /dev/null || true
+          sleep 2
+        done
 
   # --- The breakable payments service (substrate + mesh) ----------------------
   demo-app:
@@ -255,79 +224,14 @@ services:
     depends_on:
       consul:
         condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
       demo-app:
         condition: service_healthy
     environment:
       SERVICE_ID: payments-1
 
-  # --- Envoy gateways (profile: mesh) -----------------------------------------
-  envoy:
-    image: envoyproxy/envoy:v1.32.2
-    profiles: [mesh]
-    user: root
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "mkdir -p /var/log/envoy && exec envoy -c /etc/envoy/envoy-access-log.json --service-cluster web --service-node web-proxy -l info"
-    volumes:
-      - ./mesh/envoy/envoy-access-log.json:/etc/envoy/envoy-access-log.json:ro
-      - envoy-logs:/var/log/envoy
-    ports:
-      - "20200:20200"
-      - "21000:21000"
-    networks: [causa]
-    depends_on: [web]
-
-  api-gateway:
-    image: envoyproxy/envoy:v1.32.2
-    profiles: [mesh]
-    user: root
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "mkdir -p /var/log/envoy && exec envoy -c /etc/envoy/envoy-api-gateway.json --service-cluster api-gateway --service-node api-gateway -l info"
-    volumes:
-      - ./mesh/envoy/envoy-api-gateway.json:/etc/envoy/envoy-api-gateway.json:ro
-      - envoy-logs:/var/log/envoy
-    ports:
-      - "20201:20201"
-      - "21001:21001"
-    networks: [causa]
-    depends_on: [web, otel-collector]
-
-  terminating-gateway:
-    image: envoyproxy/envoy:v1.32.2
-    profiles: [mesh]
-    user: root
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "exec envoy -c /etc/envoy/envoy-terminating-gateway.json --service-cluster terminating-gateway --service-node terminating-gateway -l info"
-    volumes:
-      - ./mesh/envoy/envoy-terminating-gateway.json:/etc/envoy/envoy-terminating-gateway.json:ro
-    ports:
-      - "20202:20202"
-      - "9190:9190"
-    networks: [causa]
-    depends_on: [rates]
-
-  loadgen:
-    image: curlimages/curl:8.7.1
-    profiles: [mesh]
-    depends_on: [envoy, api-gateway, web]
-    networks: [causa]
-    entrypoint:
-      - sh
-      - -c
-      - |
-        echo "Waiting for mesh services..."
-        sleep 25
-        while true; do
-          curl -sf http://envoy:21000/ > /dev/null || true
-          curl -sf http://envoy:21000/ > /dev/null || true
-          curl -sf http://api-gateway:21001/ > /dev/null || true
-          curl -sf http://web:9090/ > /dev/null || true
-          sleep 2
-        done
-
-  # --- Causa itself (Phase 4/5) ----------------------------------------------
+  # --- Causa itself (optional Docker services; host run via run-local.sh) -----
   causa-api:
     build:
       context: .

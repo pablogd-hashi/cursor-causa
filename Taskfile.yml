@@ -4,7 +4,7 @@ vars:
   PY: "{{.TASKFILE_DIR}}/.venv/bin/python"
   PIP: "{{.TASKFILE_DIR}}/.venv/bin/pip"
   SUBSTRATE: otel-collector prometheus alertmanager loki jaeger grafana demo-app
-  MESH_SERVICES: consul consul-init rates currency currency-sidecar cache cache-sidecar api api-sidecar web web-sidecar payments-sidecar envoy api-gateway terminating-gateway loadgen
+  MESH_SERVICES: consul consul-init api api-sidecar web web-sidecar payments-sidecar loadgen
 
 tasks:
   default:
@@ -56,10 +56,20 @@ tasks:
       - docker compose up -d --build {{.SUBSTRATE}}
 
   mesh:up:
-    desc: Start full Consul Connect mesh + unified observability stack
+    desc: Start minimal Consul mesh (web→api→payments) + observability
     cmds:
+      - docker compose --profile mesh stop {{.MESH_SERVICES}} 2>/dev/null || true
+      - docker volume rm causa_consul-data 2>/dev/null || true
       - docker compose --profile mesh up -d --build {{.SUBSTRATE}} {{.MESH_SERVICES}}
-      - echo "Consul UI http://localhost:8500 — mesh traffic via http://localhost:21000/"
+      - echo "Consul  http://localhost:8500"
+      - echo "Mesh    http://localhost:9080/  (web → api → payments)"
+      - echo "Grafana http://localhost:3000/d/service-to-service"
+
+  mesh:demo:
+    desc: Interactive walkthrough — mesh, topology, triage
+    deps: [setup]
+    cmds:
+      - ./mesh-demo.sh
 
   mesh:down:
     desc: Stop mesh profile services (keeps substrate running)

@@ -1,106 +1,82 @@
 # Consul Connect mesh demo
 
-Causa can run the payments incident demo on a **real Consul Connect mesh** with
-trace-derived blast radius, while keeping the offline path (`CAUSA_TOPOLOGY=declared`,
-`CAUSA_INVESTIGATOR=mock`) unchanged.
+Causa can run the payments incident demo on a **minimal Consul Connect mesh**
+with trace-derived blast radius. The offline path (`CAUSA_TOPOLOGY=declared`) is
+unchanged.
 
-## Topology
+## Topology (simplified)
 
 ```
-web → api → payments (demo-app) → currency → rates (external via terminating gateway)
-              └→ cache
+web (:9080) → api (:9091) → payments/demo-app (:8080)
 ```
 
-- **payments** is this repo's `demo-app` (connection pool regression), registered
-  in Consul with a Connect sidecar.
-- **web / api / cache / currency** are `fake-service` containers with Envoy sidecars.
-- **rates** sits outside the mesh; **currency** reaches it through the terminating
-  gateway.
-- Traces flow to the unified OTel Collector (OTLP from payments, Zipkin from
-  fake-services and Envoy). The **servicegraph** connector emits
-  `traces_service_graph_request_total{client,server}` for Prometheus.
+Three mesh services, three Envoy sidecars, one loadgen. No gateways, cache,
+currency, or rates — enough to demonstrate live blast radius from traces.
 
-ACLs are **off** in this demo. Production hardening (not implemented here):
-
-- Enable Consul ACLs and least-privilege tokens per service
-- mTLS via Connect with a proper CA (Vault PKI or Consul's built-in CA with
-  auto-encrypt)
-- Narrow service intentions instead of the permissive `*` allow rule
-
-## Quick start
+## Quick start — interactive walkthrough
 
 ```bash
-# 1. Observability + mesh (one stack, one of each backend)
-task mesh:up
+task setup
+task mesh:demo          # pauses at each step; press Enter
+# or
+./mesh-demo.sh -y       # auto-advance (5s per step)
+```
 
-# 2. Wait ~30s for loadgen + service graph metrics, then verify Consul UI
-open http://localhost:8500          # web, api, payments, … with sidecars healthy
+The script walks through:
 
-# 3. Live blast radius from the mesh graph
-CAUSA_TOPOLOGY=consul .venv/bin/python -c "
-from causa.topology import get_topology
-t = get_topology()
-print(t.graph_source, t.dependents('payments'))
-"
+1. Start stack (fresh Consul catalog — no ghost nodes)
+2. Consul UI — verify web / api / payments + sidecars
+3. Trace one request through the mesh
+4. Service graph in Grafana / Prometheus
+5. `CAUSA_TOPOLOGY=consul` vs `declared` blast radius
+6. Start Causa API
+7. **Trigger triage** (`POST /investigations`) and show live `blast_radius_hint`
+8. Optional console + break steps
 
-# 4. Fire the incident through mesh traffic
-./break.sh    # detects :21000 and drives load via Envoy → web → api → payments
+## Manual commands
 
-# 5. Run Causa with live topology
-CAUSA_TOPOLOGY=consul task run:local
+```bash
+task mesh:up            # wipes consul-data volume, starts fresh
+
+open http://localhost:8500                          # Consul UI
+curl http://localhost:9080/                         # mesh entry
+open http://localhost:3000/d/service-to-service     # Grafana graph
+
+CAUSA_TOPOLOGY=consul ./run-local.sh                # API + console
+# Console → "Simulate payments alert"  OR:
+curl -X POST http://localhost:8000/investigations \
+  -H 'Content-Type: application/json' \
+  -d '{"alertname":"PaymentsHighLatencyP99","service":"payments"}'
+
+./break.sh              # pool=10, mesh load via :9080
 ```
 
 ## Endpoints
 
 | URL | Purpose |
 |-----|---------|
-| http://localhost:8500 | Consul UI (mesh health, sidecars) |
-| http://localhost:21000/ | Mesh ingress (Envoy → web) |
+| http://localhost:8500 | Consul UI |
+| http://localhost:9080/ | Mesh entry (web → api → payments) |
+| http://localhost:9091/ | api directly (debug) |
+| http://localhost:8080/healthz | payments directly |
 | http://localhost:3000/d/service-to-service | Service dependency graph |
-| http://localhost:3000/d/payments/payments | Payments latency dashboard |
-| http://localhost:9090 | Prometheus (`traces_service_graph_request_total`) |
-| http://localhost:16686 | Jaeger |
+| http://localhost:8501 | Causa console |
 
 ## Environment flags
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CAUSA_TOPOLOGY` | `declared` | `consul` queries Prometheus servicegraph metrics |
-| `CAUSA_INVESTIGATOR` | `mock` | Unchanged; mesh does not require live Cursor |
-| `PROMETHEUS_URL` | `http://localhost:9090` | Override for topology queries on the host |
-| `POOL_MAX_SIZE` | `50` | Break with `./break.sh` (recreates demo-app at `10`) |
+| `CAUSA_TOPOLOGY` | `declared` | `consul` = live servicegraph |
+| `CAUSA_INVESTIGATOR` | `mock` | Unchanged |
+| `PROMETHEUS_URL` | `http://localhost:9090` | Topology queries on host |
 
-## Offline demo (unchanged)
+## Why Consul looked “half down”
 
-```bash
-task demo
-# or
-task substrate:up && task run:local
-```
+Sidecars used ephemeral node names; each restart left orphan catalog entries
+showing as critical (“Agent not live”). `task mesh:up` now wipes the
+`consul-data` volume, and sidecars use stable `${SERVICE_ID}-node` names with
+`leave_on_terminate`.
 
-No Consul services are started (`docker compose` profile `mesh` is not active).
-`CAUSA_TOPOLOGY=declared` reads `topology.yaml` for blast radius.
+## Production hardening (not implemented)
 
-## Layout
-
-```
-mesh/
-  consul/           # Server HCL, proxy-defaults, intentions, service-defaults
-  envoy/            # Access log, API gateway, terminating gateway JSON
-  scripts/          # consul-init.sh — applies config entries on boot
-```
-
-Mesh services use the Compose profile `mesh` so `task substrate:up` stays
-lightweight. `task mesh:up` starts substrate **and** mesh.
-
-## Verification checklist
-
-1. Consul UI shows **web, api, payments, currency, cache, rates** passing checks;
-   Connect sidecars appear for mesh services.
-2. Grafana **service-to-service** dashboard shows **web → api → payments**.
-3. `traces_service_graph_request_total{server="payments"}` is non-empty in Prometheus.
-4. `CAUSA_TOPOLOGY=consul` → `dependents('payments')` returns live clients (e.g.
-   `api`, `web`).
-5. `./break.sh` fires `PaymentsHighLatencyP99`; brief `blast_radius_hint` matches
-   the live set with `graph_source` **consul-mesh (servicegraph)**.
-6. `CAUSA_TOPOLOGY=declared task demo` still runs fully offline.
+ACLs off in this demo. Future work: mTLS, Consul ACLs, Vault PKI Connect CA.

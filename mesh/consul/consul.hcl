@@ -36,36 +36,5 @@ ports {
   dns  = 8600
 }
 
-# Gateways and external rates stay on the server; mesh apps register locally.
-services {
-  name = "api-gateway"
-  id   = "api-gateway-1"
-  port = 21001
-  tags = ["gateway", "ingress", "api-gateway"]
-
-  check {
-    http     = "http://api-gateway:20201/ready"
-    interval = "10s"
-    timeout  = "3s"
-  }
-}
-
-services {
-  name = "terminating-gateway"
-  id   = "terminating-gateway-1"
-  port = 9190
-  tags = ["gateway", "terminating", "egress"]
-}
-
-services {
-  name = "rates"
-  id   = "rates-1"
-  port = 9090
-  tags = ["v1", "external", "rates"]
-
-  check {
-    http     = "http://rates:9090/health"
-    interval = "10s"
-    timeout  = "3s"
-  }
-}
+# Mesh apps (web, api, payments) register on their local Connect agents.
+# The server only runs the catalog — no app services defined here.

@@ -8,9 +8,6 @@ service {
     sidecar_service {
       proxy {
         mode = "transparent"
-        upstreams = [
-          { destination_name = "currency" local_bind_port = 19092 },
-        ]
       }
     }
   }
