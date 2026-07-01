@@ -2,14 +2,17 @@
 
 ## Cursor Cloud specific instructions
 
-Causa is a phased prototype (Phases 0–1 complete; see `README.md` and
-`architecture.md`). Only the demo substrate is runnable today: the `causa` RCA
-contract, the `demo-app` payments service + oracle test, the Docker
-observability stack, and the `sdk-runner` Cursor SDK smoke-test. The
-`causa-api` / `causa-console` services in `docker-compose.yml` are **not built
-yet** (no `Dockerfile.api` / `Dockerfile.console`), so `docker compose up`
-without an explicit service list will fail. Only bring up the documented
-subset.
+Causa is a working prototype (Phases 0–6 complete; see `README.md` and
+`architecture.md`). The full pipeline is built: the `causa` RCA contract, the
+`demo-app` payments service + oracle test, the Docker observability stack, the
+triage sources (mock + live Grafana/GitHub MCP in `causa/sources/`), the
+investigator interface (`MockInvestigator` + `CursorInvestigator` via
+`sdk-runner`), the FastAPI orchestration API (`causa/api.py`), and the Streamlit
+console (`console/app.py`). `Dockerfile.api` / `Dockerfile.console` exist, but the
+documented way to run the API and console is on the host via `run-local.sh`
+(`task run:local` / `task demo`). Do **not** run a bare `docker compose up` —
+bring up the substrate subset explicitly (see `README.md`), since the app
+services build images and expect host-side env.
 
 ### Python (causa contract + demo-app)
 

@@ -37,3 +37,6 @@ sdk-runner/result.json
 # Note: schema/rca.schema.json IS tracked on purpose — it is generated from
 # causa/contract.py but is a deliverable handed to the Cursor agent.
 *.pdf
+
+# Local-only notes / crib sheets — never committed.
+*.local.md
