@@ -68,6 +68,9 @@ tasks:
   mesh:demo:
     desc: Interactive walkthrough — mesh, topology, triage
     deps: [setup]
+    preconditions:
+      - sh: test -f "{{.TASKFILE_DIR}}/mesh-demo.sh"
+        msg: "mesh-demo.sh missing — git pull origin cursor/mesh-native-causa-492c"
     cmds:
       - ./mesh-demo.sh
 

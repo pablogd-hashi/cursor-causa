@@ -58,20 +58,52 @@ for x in json.load(sys.stdin):
 }
 
 show_graph() {
-  curl -fsS 'http://localhost:9090/api/v1/query?query=traces_service_graph_request_total' 2>/dev/null | \
-    $PY -c "
+  local tries="${1:-5}"
+  for _ in $(seq 1 "$tries"); do
+    if out=$(curl -fsS 'http://localhost:9090/api/v1/query?query=traces_service_graph_request_total' 2>/dev/null); then
+      echo "$out" | $PY -c "
 import json,sys
 d=json.load(sys.stdin)
 edges=set()
 for r in d.get('data',{}).get('result',[]):
     m=r.get('metric',{})
-  c,s=m.get('client','?'),m.get('server','?')
-  if c and s: edges.add(f'{c} → {s}')
+    c,s=m.get('client','?'),m.get('server','?')
+    if c and s:
+        edges.add(f'{c} → {s}')
 if edges:
-    for e in sorted(edges): print(f'  {e}')
+    for e in sorted(edges):
+        print(f'  {e}')
 else:
-    print('  (no edges yet — loadgen needs ~30s)')
-" 2>/dev/null || echo "  (Prometheus not ready)"
+    print('  (no edges yet)')
+    sys.exit(1)
+" && return 0
+    fi
+    sleep 5
+  done
+  echo "  (Prometheus not ready — open http://localhost:9090/graph)"
+}
+
+wait_mesh_services() {
+  local want="api api-sidecar-proxy payments payments-sidecar-proxy web web-sidecar-proxy"
+  for _ in $(seq 1 30); do
+    local have
+    have=$(curl -fsS 'http://localhost:8500/v1/health/state/passing' 2>/dev/null | \
+      $PY -c "
+import json,sys
+print(' '.join(sorted({x.get('ServiceName','') for x in json.load(sys.stdin) if x.get('ServiceName')})))
+" 2>/dev/null || echo "")
+    local ok=true
+    for s in $want; do
+      echo "$have" | grep -qw "$s" || ok=false
+    done
+    if $ok; then
+      echo "  ✓ all 6 mesh services passing"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "  ⚠ not all mesh services passing yet (sidecars may still be starting)"
+  return 1
 }
 
 show_topology() {
@@ -116,6 +148,7 @@ $DOCKER compose --profile mesh up -d --build \
 wait_healthy http://localhost:8500/v1/status/leader "Consul server"
 wait_healthy http://localhost:8080/healthz "payments (demo-app)"
 wait_healthy http://localhost:9080/health "web (mesh entry)"
+wait_mesh_services || true
 
 # ── Step 2: Consul UI ────────────────────────────────────────────────────────
 step "2 · Consul UI — mesh health" \
@@ -162,7 +195,7 @@ Prometheus:  http://localhost:9090/graph
 echo "  Waiting 20s for servicegraph metrics…"
 sleep 20
 echo "  Edges:"
-show_graph
+show_graph 6
 
 # ── Step 5: Causa topology source ────────────────────────────────────────────
 step "5 · Live blast radius (CAUSA_TOPOLOGY=consul)" \
